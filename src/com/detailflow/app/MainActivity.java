@@ -23,6 +23,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -382,9 +383,10 @@ public class MainActivity extends Activity {
         if (notes.length() > 700) notes = notes.substring(0, 700) + "…";
         String size = release.size > 0 ? String.format(ru, "%.1f МБ", release.size / 1048576f) : "APK";
         String description = "Версия " + release.tag + " • " + size + (notes.isEmpty() ? "" : "\n\n" + notes);
-        new AlertDialog.Builder(this).setTitle("Доступно обновление").setMessage(description)
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Доступно обновление").setMessage(description)
                 .setNegativeButton("Позже", null)
-                .setPositiveButton("Скачать", (dialog, which) -> updateManager.download(release)).show();
+                .setPositiveButton("Скачать", (ignoredDialog, which) -> updateManager.download(release)).create();
+        showStyledDialog(dialog);
     }
 
     private void showServices() {
@@ -451,12 +453,23 @@ public class MainActivity extends Activity {
         Models.Client client = store.clientById(clientId);
         if (client == null) return;
         navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Клиент", client.name, () -> showClients());
+        LinearLayout root = page("Клиент", client.car, () -> showClients());
         LinearLayout body = bodyOf(scrollBody(root));
-        LinearLayout profile = card();
-        profile.addView(text(client.name, 22, INK, Typeface.BOLD));
-        profile.addView(text(client.phone, 15, MUTED, Typeface.NORMAL), topMargin(-1, 6));
-        profile.addView(text(client.car, 16, INK, Typeface.NORMAL), topMargin(-1, 10));
+        LinearLayout profile = cardWithColor(Color.rgb(239, 246, 255));
+        LinearLayout identity = new LinearLayout(this);
+        identity.setOrientation(LinearLayout.HORIZONTAL);
+        identity.setGravity(Gravity.CENTER_VERTICAL);
+        TextView avatar = text(client.name.trim().isEmpty() ? "?" : client.name.trim().substring(0, 1).toUpperCase(ru), 24, Color.WHITE, Typeface.BOLD);
+        avatar.setGravity(Gravity.CENTER);
+        avatar.setBackground(rounded(BLUE, 18, 0, Color.TRANSPARENT));
+        identity.addView(avatar, new LinearLayout.LayoutParams(dp(56), dp(56)));
+        LinearLayout details = new LinearLayout(this);
+        details.setOrientation(LinearLayout.VERTICAL);
+        details.addView(text(client.name, 21, INK, Typeface.BOLD));
+        details.addView(text(client.phone.isEmpty() ? "Телефон не указан" : client.phone, 15, MUTED, Typeface.NORMAL), topMargin(-1, 5));
+        identity.addView(details, leftMargin(-1, 14, 1));
+        profile.addView(identity);
+        profile.addView(text(client.car, 15, BLUE_DARK, Typeface.BOLD), topMargin(-1, 14));
         body.addView(profile);
 
         LinearLayout actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -586,8 +599,8 @@ public class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Новая запись")
                 .setView(scroll)
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Сохранить", null)
+                .setNegativeButton("Отменить", null)
+                .setPositiveButton("Создать запись", null)
                 .create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String clientName = name.getText().toString().trim();
@@ -617,7 +630,7 @@ public class MainActivity extends Activity {
             dialog.dismiss();
             showOrderDetail(order.id);
         }));
-        dialog.show();
+        showStyledDialog(dialog);
     }
 
     private void editService(Models.Service existing) {
@@ -656,7 +669,7 @@ public class MainActivity extends Activity {
                 store.services.remove(existing); store.save(); dialog.dismiss(); showServices();
             });
         });
-        dialog.show();
+        showStyledDialog(dialog);
     }
 
     private void addTransaction(boolean income) { addTransaction(income, null); }
@@ -698,7 +711,7 @@ public class MainActivity extends Activity {
         }
         Spinner finalOrderSpinner = orderSpinner;
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(income ? "Добавить доход" : "Добавить расход")
-                .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
+                .setView(form).setNegativeButton("Отменить", null).setPositiveButton("Добавить", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String titleText = title.getText().toString().trim(); long amountValue = parseLong(amount.getText().toString());
             if (titleText.isEmpty()) { title.setError("Укажите название"); return; }
@@ -708,7 +721,7 @@ public class MainActivity extends Activity {
             store.save(); dialog.dismiss();
             if (presetOrder == null) showFinance(); else showOrderDetail(presetOrder.id);
         }));
-        dialog.show();
+        showStyledDialog(dialog);
     }
 
     private void chooseDateTime(Calendar selected, Button button) {
@@ -725,10 +738,11 @@ public class MainActivity extends Activity {
 
     private void choosePhoto(String orderId, boolean before) {
         photoOrderId = orderId;
-        new AlertDialog.Builder(this).setTitle(before ? "Фото до работы" : "Фото после работы")
-                .setItems(new String[]{"Снять камерой", "Выбрать из галереи"}, (dialog, which) -> {
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(before ? "Фото до работы" : "Фото после работы")
+                .setItems(new String[]{"Снять камерой", "Выбрать из галереи"}, (ignoredDialog, which) -> {
                     if (which == 0) openCamera(before); else openGallery(before);
-                }).show();
+                }).create();
+        showStyledDialog(dialog);
     }
 
     private void openCamera(boolean before) {
@@ -1007,7 +1021,57 @@ public class MainActivity extends Activity {
         try { startActivity(intent); } catch (Exception error) { toast("Подходящее приложение не найдено"); }
     }
     private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_SHORT).show(); }
-    private void message(String title, String body) { new AlertDialog.Builder(this).setTitle(title).setMessage(body).setPositiveButton("Понятно", null).show(); }
+    private void message(String title, String body) {
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setMessage(body)
+                .setPositiveButton("Понятно", null).create();
+        showStyledDialog(dialog);
+    }
+
+    private void showStyledDialog(AlertDialog dialog) {
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(rounded(SURFACE, 24, 1, BORDER));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams attributes = window.getAttributes();
+            attributes.dimAmount = 0.46f;
+            window.setAttributes(attributes);
+            int width = Math.min(Math.round(getResources().getDisplayMetrics().widthPixels * 0.92f), dp(520));
+            window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+
+        int alertTitleId = getResources().getIdentifier("alertTitle", "id", "android");
+        TextView title = alertTitleId == 0 ? null : dialog.findViewById(alertTitleId);
+        if (title != null) {
+            title.setTextColor(INK);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21);
+            title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        }
+        TextView message = dialog.findViewById(android.R.id.message);
+        if (message != null) {
+            message.setTextColor(MUTED);
+            message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            message.setLineSpacing(0, 1.12f);
+        }
+        styleDialogButton(dialog.getButton(AlertDialog.BUTTON_NEGATIVE), MUTED);
+        styleDialogButton(dialog.getButton(AlertDialog.BUTTON_NEUTRAL), RED);
+        styleDialogButton(dialog.getButton(AlertDialog.BUTTON_POSITIVE), BLUE);
+        if (dialog.getListView() != null) {
+            dialog.getListView().setDivider(null);
+            dialog.getListView().setPadding(dp(8), dp(4), dp(8), dp(8));
+        }
+    }
+
+    private void styleDialogButton(Button button, int color) {
+        if (button == null) return;
+        button.setAllCaps(false);
+        button.setTextColor(color);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setMinHeight(dp(48));
+        button.setPadding(dp(12), 0, dp(12), 0);
+        button.setStateListAnimator(null);
+    }
 
     @Override
     public void onBackPressed() {

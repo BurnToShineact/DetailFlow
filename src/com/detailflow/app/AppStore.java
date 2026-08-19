@@ -90,6 +90,21 @@ final class AppStore {
         return null;
     }
 
+    Models.Client findClientByNameOrPhone(String name, String phone) {
+        String normalizedName = name == null ? "" : name.trim();
+        String normalizedPhone = phone == null ? "" : phone.replaceAll("[^0-9]", "");
+        Models.Client match = null;
+        for (Models.Client item : clients) {
+            boolean sameName = !normalizedName.isEmpty() && item.name.trim().equalsIgnoreCase(normalizedName);
+            boolean samePhone = !normalizedPhone.isEmpty()
+                    && item.phone.replaceAll("[^0-9]", "").equals(normalizedPhone);
+            if (!sameName && !samePhone) continue;
+            if (match != null && !match.id.equals(item.id)) return null;
+            match = item;
+        }
+        return match;
+    }
+
     void sortOrders() {
         orders.sort(Comparator.comparingLong(item -> item.startAt));
     }

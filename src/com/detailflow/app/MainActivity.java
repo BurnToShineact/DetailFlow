@@ -26,7 +26,6 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
-import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -353,11 +352,53 @@ public class MainActivity extends Activity {
         LinearLayout root = page("Ещё", "Настройки бизнеса", null);
         LinearLayout body = bodyOf(scrollBody(root));
         body.addView(actionCard("Клиенты", "Контакты и история заказов", () -> showClients()));
+        body.addView(actionCard("История заказов", "Поиск по заказам и клиентам", () -> showOrderHistory()), topMargin(-1, 12));
         body.addView(actionCard("Услуги", "Названия, цены и длительность", () -> showServices()), topMargin(-1, 12));
         body.addView(actionCard("Обновления", "Проверка новых версий через GitHub", () -> showUpdates()), topMargin(-1, 12));
         body.addView(actionCard("О приложении", "DetailFlow " + updateManager.currentVersion() + " • данные хранятся на телефоне", () ->
                 message("DetailFlow", "Автономное приложение для управления детейлингом. Интернет и регистрация не требуются.")), topMargin(-1, 12));
         setPage(root);
+    }
+
+    private void showOrderHistory() {
+        navigation.setVisibility(View.GONE);
+        LinearLayout root = page("История заказов", "Все записи в одном месте", () -> showRoute("more"));
+        LinearLayout body = bodyOf(scrollBody(root));
+        EditText search = field("Клиент, телефон, авто или № заказа", InputType.TYPE_CLASS_TEXT);
+        body.addView(labeled(search));
+        LinearLayout historyList = new LinearLayout(this);
+        historyList.setOrientation(LinearLayout.VERTICAL);
+        body.addView(historyList, topMargin(-1, 8));
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                renderOrderHistory(historyList, value == null ? "" : value.toString());
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        renderOrderHistory(historyList, "");
+        setPage(root);
+    }
+
+    private void renderOrderHistory(LinearLayout historyList, String query) {
+        historyList.removeAllViews();
+        String normalized = query.trim().toLowerCase(ru);
+        String digits = query.replaceAll("[^0-9]", "");
+        List<Models.Order> orders = new ArrayList<>(store.orders);
+        orders.sort((a, b) -> Long.compare(b.startAt, a.startAt));
+        int visible = 0;
+        for (Models.Order order : orders) {
+            String searchable = (order.id + " " + order.clientName + " " + order.phone + " " + order.car + " " + order.status).toLowerCase(ru);
+            boolean matches = normalized.isEmpty() || searchable.contains(normalized)
+                    || (!digits.isEmpty() && (order.phone.replaceAll("[^0-9]", "").contains(digits) || order.id.contains(digits)));
+            if (!matches) continue;
+            visible++;
+            historyList.addView(orderHistoryCard(order), topMargin(-1, 12));
+        }
+        if (visible == 0) {
+            historyList.addView(emptyCard(orders.isEmpty() ? "Заказов пока нет" : "Ничего не найдено",
+                    orders.isEmpty() ? "Создайте первую запись — она появится здесь." : "Попробуйте имя, телефон, автомобиль или номер заказа."));
+        }
     }
 
     private void showUpdates() {
@@ -629,54 +670,36 @@ public class MainActivity extends Activity {
         EditText phone = field("Телефон", InputType.TYPE_CLASS_PHONE);
         EditText car = field("Автомобиль и номер", InputType.TYPE_CLASS_TEXT);
 
-        List<Models.Client> clientChoices = new ArrayList<>();
-        clientChoices.add(null);
-        List<String> clientNames = new ArrayList<>();
-        clientNames.add("Новый клиент — заполнить вручную");
-        List<Models.Client> sortedClients = new ArrayList<>(store.clients);
-        sortedClients.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
-        int presetIndex = 0;
-        for (Models.Client client : sortedClients) {
-            clientChoices.add(client);
-            clientNames.add(client.name + (client.phone.isEmpty() ? "" : " • " + client.phone));
-            if (preset != null && preset.id.equals(client.id)) presetIndex = clientChoices.size() - 1;
-        }
-
         LinearLayout clientSection = dialogSection("Клиент");
-        TextView clientLabel = text("Клиент из базы", 13, MUTED, Typeface.BOLD);
-        clientSection.addView(clientLabel);
-        Spinner clientSpinner = new Spinner(this);
-        clientSpinner.setId(View.generateViewId());
-        clientSpinner.setContentDescription("Клиент из базы");
-        clientSpinner.setMinimumHeight(dp(56));
-        clientSpinner.setPadding(dp(10), 0, dp(10), 0);
-        clientSpinner.setBackground(rounded(SURFACE, 12, 1, BORDER));
-        ArrayAdapter<String> clientAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, clientNames);
-        clientAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        clientSpinner.setAdapter(clientAdapter);
-        clientLabel.setLabelFor(clientSpinner.getId());
-        clientSection.addView(clientSpinner, topMargin(-1, 5));
+        TextView clientState = text("", 14, BLUE_DARK, Typeface.BOLD);
+        clientState.setGravity(Gravity.CENTER_VERTICAL);
+        clientState.setMinHeight(dp(48));
+        clientState.setPadding(dp(12), dp(8), dp(12), dp(8));
+        clientSection.addView(clientState, topMargin(-1, 8));
         clientSection.addView(labeled(name), topMargin(-1, 10));
         clientSection.addView(labeled(phone), topMargin(-1, 8));
         clientSection.addView(labeled(car), topMargin(-1, 8));
+        LinearLayout clientSuggestions = new LinearLayout(this);
+        clientSuggestions.setOrientation(LinearLayout.VERTICAL);
+        clientSection.addView(clientSuggestions, topMargin(-1, 4));
         form.addView(clientSection);
 
         Models.Client[] selectedClient = {preset};
-        clientSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                Models.Client selected = clientChoices.get(position);
-                selectedClient[0] = selected;
-                boolean editable = selected == null;
-                name.setEnabled(editable); phone.setEnabled(editable); car.setEnabled(editable);
-                if (selected != null) {
-                    name.setText(selected.name); phone.setText(selected.phone); car.setText(selected.car);
-                } else if (preset == null || position == 0) {
-                    name.setText(""); phone.setText(""); car.setText("");
-                }
+        boolean[] updatingClient = {false};
+        TextWatcher clientWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable value) {
+                refreshClientMatch(name, phone, car, clientState, clientSuggestions, selectedClient, updatingClient);
             }
-            @Override public void onNothingSelected(AdapterView<?> parent) { }
-        });
-        clientSpinner.setSelection(presetIndex);
+        };
+        name.addTextChangedListener(clientWatcher);
+        phone.addTextChangedListener(clientWatcher);
+        if (preset == null) {
+            refreshClientMatch(name, phone, car, clientState, clientSuggestions, selectedClient, updatingClient);
+        } else {
+            applyClientSelection(preset, name, phone, car, clientState, clientSuggestions, selectedClient, updatingClient);
+        }
 
         LinearLayout workSection = dialogSection("Работы");
 
@@ -715,7 +738,7 @@ public class MainActivity extends Activity {
             if (carText.isEmpty()) { car.setError("Укажите автомобиль"); return; }
             if (chosen.isEmpty()) { toast("Выберите хотя бы одну работу"); return; }
 
-            Models.Client client = selectedClient[0] != null ? selectedClient[0] : store.findClient(phoneText, carText);
+            Models.Client client = selectedClient[0] != null ? selectedClient[0] : store.findClientByNameOrPhone(clientName, phoneText);
             if (client == null) {
                 client = new Models.Client(store.newId(), clientName, phoneText, carText);
                 store.clients.add(client);
@@ -734,6 +757,78 @@ public class MainActivity extends Activity {
             showOrderDetail(order.id);
         }));
         showStyledDialog(dialog);
+    }
+
+    private void refreshClientMatch(EditText name, EditText phone, EditText car,
+                                    TextView clientState, LinearLayout suggestions,
+                                    Models.Client[] selectedClient, boolean[] updatingClient) {
+        if (updatingClient[0]) return;
+        String nameQuery = name.getText().toString().trim();
+        String normalizedName = nameQuery.toLowerCase(ru);
+        String phoneDigits = phone.getText().toString().replaceAll("[^0-9]", "");
+        List<Models.Client> exact = new ArrayList<>();
+        List<Models.Client> similar = new ArrayList<>();
+        for (Models.Client client : store.clients) {
+            String clientName = client.name == null ? "" : client.name.trim();
+            String clientPhone = client.phone == null ? "" : client.phone.replaceAll("[^0-9]", "");
+            boolean exactName = !normalizedName.isEmpty() && clientName.equalsIgnoreCase(nameQuery);
+            boolean exactPhone = !phoneDigits.isEmpty() && clientPhone.equals(phoneDigits);
+            if (exactName || exactPhone) exact.add(client);
+            boolean similarName = normalizedName.length() >= 2 && clientName.toLowerCase(ru).contains(normalizedName);
+            boolean similarPhone = phoneDigits.length() >= 3 && clientPhone.contains(phoneDigits);
+            if (similarName || similarPhone) similar.add(client);
+        }
+        if (exact.size() == 1) {
+            applyClientSelection(exact.get(0), name, phone, car, clientState, suggestions, selectedClient, updatingClient);
+            return;
+        }
+
+        selectedClient[0] = null;
+        suggestions.removeAllViews();
+        boolean started = !nameQuery.isEmpty() || !phoneDigits.isEmpty();
+        clientState.setText(started ? "Новый клиент • будет добавлен в базу" : "Новый клиент • введите имя или телефон");
+        clientState.setTextColor(BLUE_DARK);
+        clientState.setBackground(rounded(Color.rgb(239, 246, 255), 12, 0, Color.TRANSPARENT));
+        clientState.setContentDescription(clientState.getText());
+
+        if (similar.isEmpty()) return;
+        clientState.setText("Похожий клиент найден • выберите ниже");
+        clientState.setTextColor(AMBER);
+        clientState.setBackground(rounded(Color.rgb(255, 251, 235), 12, 0, Color.TRANSPARENT));
+        clientState.setContentDescription(clientState.getText());
+        suggestions.addView(text("Похожие клиенты", 13, MUTED, Typeface.BOLD), topMargin(-1, 8));
+        int shown = 0;
+        for (Models.Client client : similar) {
+            if (shown++ >= 3) break;
+            LinearLayout suggestion = card();
+            suggestion.setPadding(dp(12), dp(11), dp(12), dp(11));
+            suggestion.setClickable(true);
+            suggestion.setFocusable(true);
+            suggestion.setContentDescription("Выбрать клиента " + client.name);
+            suggestion.setOnClickListener(view -> applyClientSelection(client, name, phone, car,
+                    clientState, suggestions, selectedClient, updatingClient));
+            addRipple(suggestion);
+            suggestion.addView(text(client.name, 15, INK, Typeface.BOLD));
+            String detail = client.phone.isEmpty() ? client.car : client.phone + (client.car.isEmpty() ? "" : " • " + client.car);
+            if (!detail.isEmpty()) suggestion.addView(text(detail, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
+            suggestions.addView(suggestion, topMargin(-1, 8));
+        }
+    }
+
+    private void applyClientSelection(Models.Client client, EditText name, EditText phone, EditText car,
+                                      TextView clientState, LinearLayout suggestions,
+                                      Models.Client[] selectedClient, boolean[] updatingClient) {
+        updatingClient[0] = true;
+        selectedClient[0] = client;
+        name.setText(client.name);
+        phone.setText(client.phone);
+        car.setText(client.car);
+        updatingClient[0] = false;
+        suggestions.removeAllViews();
+        clientState.setText("Клиент из базы • " + client.name);
+        clientState.setTextColor(GREEN);
+        clientState.setBackground(rounded(Color.rgb(236, 253, 245), 12, 0, Color.TRANSPARENT));
+        clientState.setContentDescription(clientState.getText());
     }
 
     private void editService(Models.Service existing) {
@@ -901,6 +996,29 @@ public class MainActivity extends Activity {
         top.addView(text(time.format(new Date(order.startAt)), 20, BLUE, Typeface.BOLD));
         TextView car = text(order.car, 17, INK, Typeface.BOLD); top.addView(car, leftMargin(0, 14, 1));
         card.addView(top);
+        card.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        card.addView(statusPill(order.status), topMargin(-1, 11));
+        return card;
+    }
+
+    private LinearLayout orderHistoryCard(Models.Order order) {
+        LinearLayout card = card();
+        card.setClickable(true);
+        card.setOnClickListener(view -> showOrderDetail(order.id));
+        addRipple(card);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text(dateTime.format(new Date(order.startAt)), 16, BLUE, Typeface.BOLD));
+        TextView number = text("№ " + order.id, 13, MUTED, Typeface.BOLD);
+        number.setGravity(Gravity.END);
+        top.addView(number, leftMargin(0, 12, 1));
+        card.addView(top);
+
+        String identity = order.clientName + (order.car.isEmpty() ? "" : " • " + order.car);
+        card.addView(text(identity, 17, INK, Typeface.BOLD), topMargin(-1, 9));
+        if (!order.phone.isEmpty()) card.addView(text(order.phone, 14, MUTED, Typeface.NORMAL), topMargin(-1, 5));
         card.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
         card.addView(statusPill(order.status), topMargin(-1, 11));
         return card;

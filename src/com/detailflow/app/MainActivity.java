@@ -18,6 +18,7 @@ import android.os.Bundle;
 import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -83,6 +84,24 @@ public class MainActivity extends Activity {
     private final Map<String, TextView> navLabels = new HashMap<>();
     private final Map<String, LinearLayout> navItems = new HashMap<>();
     private final Map<String, ImageView> navIcons = new HashMap<>();
+
+    private static final class FinanceEntry {
+        final Models.Transaction transaction;
+        final Models.Order paidOrder;
+        final long createdAt;
+
+        FinanceEntry(Models.Transaction transaction) {
+            this.transaction = transaction;
+            this.paidOrder = null;
+            this.createdAt = transaction.createdAt;
+        }
+
+        FinanceEntry(Models.Order paidOrder) {
+            this.transaction = null;
+            this.paidOrder = paidOrder;
+            this.createdAt = paidOrder.startAt;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -665,10 +684,14 @@ public class MainActivity extends Activity {
         for (Models.Order order : store.orders) if (!order.paid) outstanding += order.total;
         body.addView(infoRow("Ожидается оплат", money(outstanding), AMBER), topMargin(-1, 14));
         body.addView(sectionTitle("Последние операции"), topMargin(-1, 24));
-        List<Models.Transaction> txs = new ArrayList<>(store.transactions);
-        txs.sort((a, b) -> Long.compare(b.createdAt, a.createdAt));
-        if (txs.isEmpty()) body.addView(emptyCard("Операций пока нет", "Добавьте первый доход или расход."), topMargin(-1, 10));
-        for (Models.Transaction transaction : txs) body.addView(transactionCard(transaction), topMargin(-1, 10));
+        List<FinanceEntry> entries = new ArrayList<>();
+        for (Models.Transaction transaction : store.transactions) entries.add(new FinanceEntry(transaction));
+        for (Models.Order order : store.orders) if (order.paid) entries.add(new FinanceEntry(order));
+        entries.sort((a, b) -> Long.compare(b.createdAt, a.createdAt));
+        if (entries.isEmpty()) body.addView(emptyCard("Операций пока нет", "Здесь появятся доходы и расходы."), topMargin(-1, 10));
+        for (FinanceEntry entry : entries) {
+            body.addView(entry.transaction != null ? transactionCard(entry.transaction) : paidOrderIncomeCard(entry.paidOrder), topMargin(-1, 10));
+        }
 
         LinearLayout buttons = new LinearLayout(this); buttons.setOrientation(LinearLayout.HORIZONTAL);
         Button income = outlineButton("+ Доход", GREEN); income.setOnClickListener(view -> addTransaction(true));
@@ -681,10 +704,14 @@ public class MainActivity extends Activity {
     }
 
     private void showClientDetail(String clientId) {
+        showClientDetail(clientId, this::showClients);
+    }
+
+    private void showClientDetail(String clientId, Runnable back) {
         Models.Client client = store.clientById(clientId);
         if (client == null) return;
         navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Клиент", vehicle(client.car, client.carModel, client.plate), () -> showClients());
+        LinearLayout root = page("Клиент", vehicle(client.car, client.carModel, client.plate), back);
         LinearLayout body = bodyOf(scrollBody(root));
         LinearLayout profile = cardWithColor(Color.rgb(239, 246, 255));
         LinearLayout identity = new LinearLayout(this);
@@ -703,11 +730,11 @@ public class MainActivity extends Activity {
         profile.addView(text(vehicle(client.car, client.carModel, client.plate), 15, BLUE_DARK, Typeface.BOLD), topMargin(-1, 14));
         body.addView(profile);
         Button editVehicle = outlineButton("Изменить автомобиль", BLUE);
-        editVehicle.setOnClickListener(view -> editClientVehicle(client));
+        editVehicle.setOnClickListener(view -> editClientVehicle(client, back));
         body.addView(editVehicle, topMargin(-1, 12));
         if (store.carModelById(client.carModelId) != null) {
             Button modelCard = outlineButton("Открыть карточку модели", BLUE_DARK);
-            modelCard.setOnClickListener(view -> showCarModelDetail(client.carModelId, () -> showClientDetail(client.id)));
+            modelCard.setOnClickListener(view -> showCarModelDetail(client.carModelId, () -> showClientDetail(client.id, back)));
             body.addView(modelCard, topMargin(-1, 10));
         }
 
@@ -745,7 +772,7 @@ public class MainActivity extends Activity {
         setPage(root);
     }
 
-    private void editClientVehicle(Models.Client client) {
+    private void editClientVehicle(Models.Client client, Runnable back) {
         LinearLayout form = dialogForm();
         AutoCompleteTextView car = autoCompleteField("Марка автомобиля", store.carMakes);
         AutoCompleteTextView model = autoCompleteField("Модель автомобиля", carModelNames(client.car));
@@ -781,42 +808,63 @@ public class MainActivity extends Activity {
             store.addCarMake(carValue);
             store.save();
             dialog.dismiss();
-            showClientDetail(client.id);
+            showClientDetail(client.id, back);
         }));
         showStyledDialog(dialog);
     }
 
     private void showOrderDetail(String orderId) {
+        String sourceRoute = route;
+        showOrderDetail(orderId, () -> showRoute(sourceRoute.equals("finance") ? "finance" : sourceRoute.equals("today") ? "today" : "orders"));
+    }
+
+    private void showOrderDetail(String orderId, Runnable back) {
         Models.Order order = store.orderById(orderId);
         if (order == null) return;
         navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Заказ #" + order.id, order.status, () -> showRoute(route.equals("today") ? "today" : "orders"));
+        LinearLayout root = page("Заказ #" + order.id, order.status, back);
         LinearLayout body = bodyOf(scrollBody(root));
 
         LinearLayout identity = card();
-        identity.addView(text(order.clientName + " • " + vehicle(order.car, order.carModel, order.plate), 18, INK, Typeface.BOLD));
-        if (store.carModelById(order.carModelId) != null) {
-            identity.setClickable(true);
-            identity.setFocusable(true);
-            identity.setContentDescription("Открыть карточку модели " + order.carModel);
-            identity.setOnClickListener(view -> showCarModelDetail(order.carModelId, () -> showOrderDetail(order.id)));
-            addRipple(identity);
-            identity.addView(text("Открыть карточку модели", 13, BLUE, Typeface.BOLD), topMargin(-1, 7));
+        identity.setPadding(dp(14), dp(14), dp(14), dp(15));
+        LinearLayout links = new LinearLayout(this);
+        links.setOrientation(LinearLayout.HORIZONTAL);
+        Models.Client client = store.clientById(order.clientId);
+        Button clientLink = compactLinkButton(order.clientName + "  ›");
+        clientLink.setContentDescription("Открыть карточку клиента " + order.clientName);
+        clientLink.setEnabled(client != null);
+        if (client != null) clientLink.setOnClickListener(view -> showClientDetail(client.id, () -> showOrderDetail(order.id, back)));
+        links.addView(clientLink, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Models.CarModel model = store.carModelById(order.carModelId);
+        String modelCaption = vehicle(order.car, order.carModel, "");
+        if (model != null) {
+            links.addView(new Space(this), new LinearLayout.LayoutParams(dp(9), 1));
+            Button modelLink = compactLinkButton(modelCaption + "  ›");
+            modelLink.setContentDescription("Открыть карточку модели " + modelCaption);
+            modelLink.setOnClickListener(view -> showCarModelDetail(model.id, () -> showOrderDetail(order.id, back)));
+            links.addView(modelLink, new LinearLayout.LayoutParams(0, dp(48), 1));
         }
-        identity.addView(text("Начало: " + dateTime.format(new Date(order.startAt)), 14, MUTED, Typeface.NORMAL), topMargin(-1, 8));
-        identity.addView(text("Дедлайн: " + dateTime.format(new Date(order.deadlineAt)), 14,
-                order.deadlineAt < System.currentTimeMillis() && !order.status.equals("Завершено") ? RED : MUTED, Typeface.NORMAL), topMargin(-1, 4));
-        identity.addView(statusPill(order.status), topMargin(-1, 12));
+        identity.addView(links);
+        String schedule = dateTime.format(new Date(order.startAt)) + "  →  " + dateTime.format(new Date(order.deadlineAt));
+        identity.addView(text(schedule, 14,
+                order.deadlineAt < System.currentTimeMillis() && !order.status.equals("Завершено") ? RED : MUTED,
+                Typeface.NORMAL), topMargin(-1, 12));
+        if (model == null && !modelCaption.isEmpty()) identity.addView(text(modelCaption, 13, MUTED, Typeface.BOLD), topMargin(-1, 4));
+        if (!order.plate.isEmpty()) identity.addView(text(order.plate, 13, MUTED, Typeface.BOLD), topMargin(-1, 4));
+        identity.addView(statusPill(order.status), topMargin(-1, 10));
         body.addView(identity);
 
-        body.addView(sectionTitle("Примечание к заказу"), topMargin(-1, 22));
-        LinearLayout noteCard = card();
-        noteCard.addView(text(order.orderNote.isEmpty() ? "Примечаний пока нет" : order.orderNote, 14,
-                order.orderNote.isEmpty() ? MUTED : INK, Typeface.NORMAL));
-        body.addView(noteCard, topMargin(-1, 8));
-        Button editNote = outlineButton(order.orderNote.isEmpty() ? "+ Добавить примечание" : "Изменить примечание", BLUE);
-        editNote.setOnClickListener(view -> editOrderNote(order));
-        body.addView(editNote, topMargin(-1, 8));
+        LinearLayout noteHeader = sectionHeaderWithAction("Примечание", "+");
+        Button editNote = (Button) noteHeader.getChildAt(1);
+        editNote.setContentDescription(order.orderNote.isEmpty() ? "Добавить примечание к заказу" : "Изменить примечание к заказу");
+        editNote.setOnClickListener(view -> editOrderNote(order, back));
+        body.addView(noteHeader, topMargin(-1, 18));
+        if (!order.orderNote.isEmpty()) {
+            LinearLayout noteCard = cardWithColor(Color.rgb(248, 250, 252));
+            noteCard.setPadding(dp(15), dp(13), dp(15), dp(14));
+            noteCard.addView(text(order.orderNote, 14, INK, Typeface.NORMAL));
+            body.addView(noteCard, topMargin(-1, 5));
+        }
 
         body.addView(sectionTitle("Работы"), topMargin(-1, 22));
         for (String serviceId : order.serviceIds) {
@@ -847,16 +895,16 @@ public class MainActivity extends Activity {
         body.addView(photos);
 
         Button status = primaryButton(nextStatusCaption(order.status));
-        status.setOnClickListener(view -> { advanceStatus(order); store.save(); showOrderDetail(order.id); });
+        status.setOnClickListener(view -> { advanceStatus(order); store.save(); showOrderDetail(order.id, back); });
         body.addView(status, topMargin(-1, 22));
         Button paid = outlineButton(order.paid ? "Оплата получена" : "Отметить как оплаченный", order.paid ? GREEN : BLUE);
         paid.setEnabled(!order.paid);
-        paid.setOnClickListener(view -> { order.paid = true; store.save(); showOrderDetail(order.id); });
+        paid.setOnClickListener(view -> { order.paid = true; store.save(); showOrderDetail(order.id, back); });
         body.addView(paid, topMargin(-1, 10));
         setPage(root);
     }
 
-    private void editOrderNote(Models.Order order) {
+    private void editOrderNote(Models.Order order, Runnable back) {
         LinearLayout form = dialogForm();
         EditText note = multilineField("Примечание только к этому заказу");
         note.setText(order.orderNote);
@@ -865,7 +913,7 @@ public class MainActivity extends Activity {
                 .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             order.orderNote = note.getText().toString().trim();
-            store.save(); dialog.dismiss(); showOrderDetail(order.id);
+            store.save(); dialog.dismiss(); showOrderDetail(order.id, back);
         }));
         showStyledDialog(dialog);
     }
@@ -1365,6 +1413,27 @@ public class MainActivity extends Activity {
         return item;
     }
 
+    private LinearLayout paidOrderIncomeCard(Models.Order order) {
+        LinearLayout item = card();
+        item.setClickable(true);
+        item.setFocusable(true);
+        item.setContentDescription("Открыть оплаченный заказ " + order.id);
+        item.setOnClickListener(view -> showOrderDetail(order.id, this::showFinance));
+        addRipple(item);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text("Заказ #" + order.id + " • " + order.clientName, 15, INK, Typeface.BOLD),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(text("+" + money(order.total), 15, GREEN, Typeface.BOLD));
+        item.addView(row);
+        String detail = dateTime.format(new Date(order.startAt)) + " • Оплаченный заказ";
+        String car = vehicle(order.car, order.carModel, order.plate);
+        if (!car.isEmpty()) detail += " • " + car;
+        item.addView(text(detail, 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        return item;
+    }
+
     private LinearLayout actionCard(String title, String subtitle, Runnable action) {
         LinearLayout item = card(); item.setClickable(true); item.setOnClickListener(view -> action.run());
         addRipple(item);
@@ -1397,6 +1466,46 @@ public class MainActivity extends Activity {
         Button button = new Button(this); button.setText(caption); button.setTextColor(color); button.setTextSize(15); button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setAllCaps(false); button.setGravity(Gravity.CENTER); button.setMinHeight(dp(52)); button.setBackground(rounded(SURFACE, 14, 1, color));
         button.setStateListAnimator(null); return button;
+    }
+
+    private Button compactLinkButton(String caption) {
+        Button button = new Button(this);
+        button.setText(caption);
+        button.setTextColor(BLUE_DARK);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setAllCaps(false);
+        button.setSingleLine(true);
+        button.setEllipsize(TextUtils.TruncateAt.END);
+        button.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        button.setPadding(dp(13), 0, dp(10), 0);
+        button.setMinHeight(dp(48));
+        button.setBackground(rounded(Color.rgb(239, 246, 255), 12, 0, Color.TRANSPARENT));
+        button.setStateListAnimator(null);
+        return button;
+    }
+
+    private LinearLayout sectionHeaderWithAction(String title, String action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(sectionTitle(title), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button button = new Button(this);
+        button.setText(action);
+        button.setTextColor(BLUE);
+        button.setTextSize(21);
+        button.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(0, 0, 0, dp(2));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setBackground(rounded(Color.rgb(239, 246, 255), 11, 0, Color.TRANSPARENT));
+        button.setStateListAnimator(null);
+        row.addView(button, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        return row;
     }
 
     private EditText field(String hint, int inputType) {

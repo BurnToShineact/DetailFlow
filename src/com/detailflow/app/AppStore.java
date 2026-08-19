@@ -79,6 +79,42 @@ final class AppStore {
         } catch (Exception ignored) { }
     }
 
+    String exportData() {
+        return preferences.getString("data", "");
+    }
+
+    boolean importData(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return false;
+        try {
+            JSONObject root = new JSONObject(raw);
+            JSONArray servicesJson = root.optJSONArray("services");
+            JSONArray clientsJson = root.optJSONArray("clients");
+            JSONArray ordersJson = root.optJSONArray("orders");
+            JSONArray transactionsJson = root.optJSONArray("transactions");
+            JSONArray carModelsJson = root.optJSONArray("carModels");
+            if (servicesJson == null || clientsJson == null || ordersJson == null || transactionsJson == null) return false;
+            for (int i = 0; i < servicesJson.length(); i++) Models.Service.fromJson(servicesJson.getJSONObject(i));
+            for (int i = 0; i < clientsJson.length(); i++) Models.Client.fromJson(clientsJson.getJSONObject(i));
+            for (int i = 0; i < ordersJson.length(); i++) Models.Order.fromJson(ordersJson.getJSONObject(i));
+            for (int i = 0; i < transactionsJson.length(); i++) Models.Transaction.fromJson(transactionsJson.getJSONObject(i));
+            if (carModelsJson != null) for (int i = 0; i < carModelsJson.length(); i++) Models.CarModel.fromJson(carModelsJson.getJSONObject(i));
+            String current = preferences.getString("data", "");
+            SharedPreferences.Editor editor = preferences.edit().putString("data", root.toString());
+            if (!current.isEmpty()) editor.putString("data_before_last_import", current);
+            if (!editor.commit()) return false;
+            services.clear();
+            clients.clear();
+            orders.clear();
+            transactions.clear();
+            carMakes.clear();
+            carModels.clear();
+            load();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     String newId() {
         return UUID.randomUUID().toString();
     }

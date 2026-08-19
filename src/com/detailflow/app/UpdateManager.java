@@ -63,7 +63,7 @@ final class UpdateManager {
     private static final String KEY_LAST_CHECK = "last_check";
     private static final String KEY_DOWNLOAD_ID = "download_id";
     private static final String KEY_DIGEST = "download_digest";
-    private static final long CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L;
+    private static final long CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L;
 
     private final Activity activity;
     private final SharedPreferences preferences;

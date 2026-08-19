@@ -41,6 +41,13 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -50,6 +57,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public class MainActivity extends Activity {
     private static final int BLUE = Color.rgb(37, 99, 235);
@@ -67,6 +77,9 @@ public class MainActivity extends Activity {
     private static final int REQ_CAMERA_AFTER = 202;
     private static final int REQ_GALLERY_BEFORE = 211;
     private static final int REQ_GALLERY_AFTER = 212;
+    private static final int REQ_EXPORT_DATABASE = 301;
+    private static final int REQ_IMPORT_DATABASE = 302;
+    private static final int MAX_DATABASE_ARCHIVE_BYTES = 20 * 1024 * 1024;
 
     private final Locale ru = new Locale("ru", "RU");
     private final NumberFormat moneyFormat = NumberFormat.getIntegerInstance(ru);
@@ -75,6 +88,7 @@ public class MainActivity extends Activity {
     private final SimpleDateFormat monthYear = new SimpleDateFormat("LLLL yyyy", ru);
     private final SimpleDateFormat dateTime = new SimpleDateFormat("d MMM, HH:mm", ru);
     private final SimpleDateFormat time = new SimpleDateFormat("HH:mm", ru);
+    private final SimpleDateFormat backupDate = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT);
 
     private AppStore store;
     private UpdateManager updateManager;
@@ -561,9 +575,171 @@ public class MainActivity extends Activity {
         body.addView(actionCard("Услуги", "Названия, цены и длительность", () -> showServices()), topMargin(-1, 12));
         body.addView(actionCard("Марки автомобилей", "Справочник для быстрого ввода", () -> showCarMakes()), topMargin(-1, 12));
         body.addView(actionCard("Обновления", "Проверка новых версий через GitHub", () -> showUpdates()), topMargin(-1, 12));
-        body.addView(actionCard("О приложении", "DetailFlow " + updateManager.currentVersion() + " • данные хранятся на телефоне", () ->
-                message("DetailFlow", "Автономное приложение для управления детейлингом. Интернет и регистрация не требуются.")), topMargin(-1, 12));
+        body.addView(actionCard("О приложении", "Версия и перенос базы данных", this::showAbout), topMargin(-1, 12));
         setPage(root);
+    }
+
+    private void showAbout() {
+        navigation.setVisibility(View.GONE);
+        LinearLayout root = page("О приложении", "DetailFlow " + updateManager.currentVersion(), () -> showRoute("more"));
+        LinearLayout body = bodyOf(scrollBody(root));
+
+        LinearLayout summary = cardWithColor(Color.rgb(239, 246, 255));
+        summary.addView(text("DetailFlow", 24, INK, Typeface.BOLD));
+        summary.addView(text("Версия " + updateManager.currentVersion(), 14, BLUE_DARK, Typeface.BOLD), topMargin(-1, 7));
+        summary.addView(text("Простое автономное приложение для управления детейлингом. Данные хранятся на этом телефоне.",
+                14, MUTED, Typeface.NORMAL), topMargin(-1, 12));
+        body.addView(summary);
+
+        body.addView(sectionTitle("Резервная копия"), topMargin(-1, 24));
+        body.addView(text("Архив содержит клиентов, заказы, услуги, доходы, расходы и справочники автомобилей. Его можно перенести на другое устройство или сохранить для будущего сервера.",
+                14, MUTED, Typeface.NORMAL), topMargin(-1, 8));
+
+        Button export = primaryButton("Выгрузить БД");
+        export.setContentDescription("Выгрузить базу данных в ZIP архив");
+        export.setOnClickListener(view -> chooseDatabaseExportLocation());
+        body.addView(export, topMargin(-1, 18));
+
+        Button importButton = outlineButton("Загрузить БД", BLUE);
+        importButton.setContentDescription("Загрузить базу данных из ZIP архива");
+        importButton.setOnClickListener(view -> chooseDatabaseArchive());
+        body.addView(importButton, topMargin(-1, 10));
+
+        LinearLayout warning = cardWithColor(Color.rgb(255, 247, 237));
+        warning.setPadding(dp(15), dp(13), dp(15), dp(14));
+        warning.addView(text("Фотографии не входят в архив", 14, AMBER, Typeface.BOLD));
+        warning.addView(text("Они остаются в памяти исходного телефона. Перед загрузкой другой базы сначала выгрузите текущую.",
+                13, MUTED, Typeface.NORMAL), topMargin(-1, 5));
+        body.addView(warning, topMargin(-1, 14));
+        setPage(root);
+    }
+
+    private void chooseDatabaseExportLocation() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE, "DetailFlow-backup-" + backupDate.format(new Date()) + ".zip");
+        startActivityForResult(intent, REQ_EXPORT_DATABASE);
+    }
+
+    private void chooseDatabaseArchive() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(intent, REQ_IMPORT_DATABASE);
+    }
+
+    private void writeDatabaseArchive(Uri uri) {
+        toast("Создаю архив…");
+        new Thread(() -> {
+            try {
+                JSONObject database = new JSONObject(store.exportData());
+                JSONArray orders = database.optJSONArray("orders");
+                if (orders != null) for (int index = 0; index < orders.length(); index++) {
+                    JSONObject order = orders.optJSONObject(index);
+                    if (order == null) continue;
+                    order.put("beforeUris", new JSONArray());
+                    order.put("afterUris", new JSONArray());
+                    order.remove("beforeUri");
+                    order.remove("afterUri");
+                }
+                JSONObject manifest = new JSONObject()
+                        .put("formatVersion", 1)
+                        .put("appVersion", updateManager.currentVersion())
+                        .put("exportedAt", System.currentTimeMillis())
+                        .put("photosIncluded", false);
+                try (OutputStream stream = getContentResolver().openOutputStream(uri, "w");
+                     ZipOutputStream zip = stream == null ? null : new ZipOutputStream(stream)) {
+                    if (zip == null) throw new IllegalStateException("Не удалось открыть файл");
+                    writeZipEntry(zip, "manifest.json", manifest.toString(2));
+                    writeZipEntry(zip, "database.json", database.toString());
+                }
+                runOnUiThread(() -> toast("Архив базы данных сохранён"));
+            } catch (Exception error) {
+                runOnUiThread(() -> message("Не удалось выгрузить БД", "Проверьте выбранную папку и попробуйте ещё раз."));
+            }
+        }).start();
+    }
+
+    private void writeZipEntry(ZipOutputStream zip, String name, String value) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(value.getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
+    }
+
+    private String readDatabaseArchive(Uri uri) throws Exception {
+        try (InputStream stream = getContentResolver().openInputStream(uri);
+             ZipInputStream zip = stream == null ? null : new ZipInputStream(stream)) {
+            if (zip == null) throw new IllegalStateException("Не удалось открыть архив");
+            ZipEntry entry;
+            int entryCount = 0;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entryCount > 3 || entry.isDirectory()) throw new IllegalStateException("Неподдерживаемая структура архива");
+                if (!entry.isDirectory() && "database.json".equals(entry.getName())) {
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[8192];
+                    int total = 0;
+                    int read;
+                    while ((read = zip.read(buffer)) != -1) {
+                        total += read;
+                        if (total > MAX_DATABASE_ARCHIVE_BYTES) throw new IllegalStateException("База данных слишком большая");
+                        output.write(buffer, 0, read);
+                    }
+                    return output.toString(StandardCharsets.UTF_8.name());
+                }
+                if (!"manifest.json".equals(entry.getName()) || entry.getSize() > 65536L) {
+                    throw new IllegalStateException("Неподдерживаемая структура архива");
+                }
+                int manifestBytes = 0;
+                byte[] manifestBuffer = new byte[4096];
+                int manifestRead;
+                while ((manifestRead = zip.read(manifestBuffer)) != -1) {
+                    manifestBytes += manifestRead;
+                    if (manifestBytes > 65536) throw new IllegalStateException("Manifest слишком большой");
+                }
+                zip.closeEntry();
+            }
+        }
+        throw new IllegalStateException("В архиве нет database.json");
+    }
+
+    private void prepareDatabaseImport(Uri uri) {
+        toast("Проверяю архив…");
+        new Thread(() -> {
+            try {
+                String raw = readDatabaseArchive(uri);
+                JSONObject root = new JSONObject(raw);
+                JSONArray clients = root.optJSONArray("clients");
+                JSONArray orders = root.optJSONArray("orders");
+                JSONArray transactions = root.optJSONArray("transactions");
+                JSONArray services = root.optJSONArray("services");
+                if (clients == null || orders == null || transactions == null || services == null) {
+                    throw new IllegalStateException("Неподдерживаемый формат базы данных");
+                }
+                String details = "В архиве: " + countCaption(clients.length(), "клиент", "клиента", "клиентов") + ", "
+                        + countCaption(orders.length(), "заказ", "заказа", "заказов") + ", "
+                        + countCaption(transactions.length(), "финансовая операция", "финансовые операции", "финансовых операций")
+                        + ".\n\nТекущая база будет заменена. Фотографии не переносятся.";
+                runOnUiThread(() -> {
+                    AlertDialog dialog = new AlertDialog.Builder(this)
+                            .setTitle("Загрузить эту базу?")
+                            .setMessage(details)
+                            .setNegativeButton("Отмена", null)
+                            .setNeutralButton("Загрузить", (ignored, which) -> {
+                                if (store.importData(raw)) {
+                                    toast("База данных загружена");
+                                    showAbout();
+                                } else {
+                                    message("Не удалось загрузить БД", "Архив повреждён или создан несовместимой версией приложения.");
+                                }
+                            }).create();
+                    showStyledDialog(dialog);
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> message("Не удалось открыть архив", "Выберите ZIP-архив, созданный в разделе «О приложении»."));
+            }
+        }).start();
     }
 
     private void showOrderHistory() {
@@ -768,7 +944,7 @@ public class MainActivity extends Activity {
         repository.setText(updateManager.getRepository());
         body.addView(labeled(repository), topMargin(-1, 16));
 
-        TextView state = text(updateManager.getRepository().isEmpty() ? "Автопроверка включится после сохранения репозитория." : "Автопроверка выполняется раз в сутки.", 14, MUTED, Typeface.NORMAL);
+        TextView state = text(updateManager.getRepository().isEmpty() ? "Автопроверка включится после сохранения репозитория." : "Автопроверка выполняется каждые 6 часов.", 14, MUTED, Typeface.NORMAL);
         state.setMinHeight(dp(48));
         body.addView(state, topMargin(-1, 12));
 
@@ -776,7 +952,7 @@ public class MainActivity extends Activity {
         save.setOnClickListener(view -> {
             if (updateManager.setRepository(repository.getText().toString())) {
                 repository.setText(updateManager.getRepository());
-                state.setText("Репозиторий сохранён. Автопроверка выполняется раз в сутки.");
+                state.setText("Репозиторий сохранён. Автопроверка выполняется каждые 6 часов.");
                 state.setTextColor(GREEN);
             } else {
                 repository.setError("Например: vadim/detailflow");
@@ -1584,6 +1760,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_EXPORT_DATABASE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) writeDatabaseArchive(data.getData());
+            return;
+        }
+        if (requestCode == REQ_IMPORT_DATABASE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) prepareDatabaseImport(data.getData());
+            return;
+        }
         if (resultCode != RESULT_OK || photoOrderId == null) return;
         boolean before = requestCode == REQ_CAMERA_BEFORE || requestCode == REQ_GALLERY_BEFORE;
         Uri uri = (requestCode == REQ_CAMERA_BEFORE || requestCode == REQ_CAMERA_AFTER) ? pendingCameraUri : (data == null ? null : data.getData());
@@ -1604,10 +1788,15 @@ public class MainActivity extends Activity {
         card.setOnClickListener(view -> showOrderDetail(order.id));
         addRipple(card);
         LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(text(time.format(new Date(order.startAt)), 20, BLUE, Typeface.BOLD));
-        TextView car = text(vehicle(order.car, order.carModel, order.plate), 17, INK, Typeface.BOLD); top.addView(car, leftMargin(0, 14, 1));
+        top.addView(text("Заказ #" + order.id, 18, BLUE, Typeface.BOLD));
+        TextView schedule = text(dateTime.format(new Date(order.startAt)), 13, MUTED, Typeface.BOLD);
+        schedule.setGravity(Gravity.END);
+        top.addView(schedule, leftMargin(0, 12, 1));
         card.addView(top);
-        card.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        String car = vehicle(order.car, order.carModel, order.plate);
+        card.addView(text(car.isEmpty() ? "Автомобиль не указан" : car, 15, INK, Typeface.BOLD), topMargin(-1, 9));
+        card.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
+        card.addView(text(serviceNames(order), 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
         card.addView(statusPill(order.status), topMargin(-1, 11));
         return card;
     }
@@ -1621,17 +1810,17 @@ public class MainActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(text(dateTime.format(new Date(order.startAt)), 16, BLUE, Typeface.BOLD));
-        TextView number = text("№ " + order.id, 13, MUTED, Typeface.BOLD);
-        number.setGravity(Gravity.END);
-        top.addView(number, leftMargin(0, 12, 1));
+        top.addView(text("Заказ #" + order.id, 18, BLUE, Typeface.BOLD));
+        TextView schedule = text(dateTime.format(new Date(order.startAt)), 13, MUTED, Typeface.BOLD);
+        schedule.setGravity(Gravity.END);
+        top.addView(schedule, leftMargin(0, 12, 1));
         card.addView(top);
 
         String vehicle = vehicle(order.car, order.carModel, order.plate);
-        String identity = order.clientName + (vehicle.isEmpty() ? "" : " • " + vehicle);
-        card.addView(text(identity, 17, INK, Typeface.BOLD), topMargin(-1, 9));
-        if (!order.phone.isEmpty()) card.addView(text(order.phone, 14, MUTED, Typeface.NORMAL), topMargin(-1, 5));
-        card.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        card.addView(text(vehicle.isEmpty() ? "Автомобиль не указан" : vehicle, 15, INK, Typeface.BOLD), topMargin(-1, 9));
+        card.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
+        if (!order.phone.isEmpty()) card.addView(text(order.phone, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
+        card.addView(text(serviceNames(order), 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
         card.addView(statusPill(order.status), topMargin(-1, 11));
         return card;
     }
@@ -1641,8 +1830,18 @@ public class MainActivity extends Activity {
         item.setBackground(rounded(Color.rgb(239, 246, 255), 16, 1, Color.rgb(147, 197, 253)));
         item.setOnClickListener(view -> showOrderDetail(order.id)); item.setClickable(true);
         addRipple(item);
-        item.addView(text(time.format(new Date(order.startAt)) + "  •  " + vehicle(order.car, order.carModel, order.plate), 17, INK, Typeface.BOLD));
-        item.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 6));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text("Заказ #" + order.id, 17, BLUE, Typeface.BOLD));
+        TextView schedule = text(time.format(new Date(order.startAt)), 15, INK, Typeface.BOLD);
+        schedule.setGravity(Gravity.END);
+        top.addView(schedule, leftMargin(0, 12, 1));
+        item.addView(top);
+        String car = vehicle(order.car, order.carModel, order.plate);
+        item.addView(text(car.isEmpty() ? "Автомобиль не указан" : car, 15, INK, Typeface.BOLD), topMargin(-1, 8));
+        item.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
+        item.addView(text(serviceNames(order), 13, MUTED, Typeface.NORMAL), topMargin(-1, 6));
         return item;
     }
 
@@ -1919,6 +2118,13 @@ public class MainActivity extends Activity {
         if (mod10 == 1) return "модель";
         if (mod10 >= 2 && mod10 <= 4) return "модели";
         return "моделей";
+    }
+
+    private String countCaption(int count, String one, String few, String many) {
+        int mod100 = count % 100;
+        int mod10 = count % 10;
+        String caption = mod100 >= 11 && mod100 <= 14 ? many : mod10 == 1 ? one : mod10 >= 2 && mod10 <= 4 ? few : many;
+        return count + " " + caption;
     }
 
     private String vehicle(String make, String model, String plate) {

@@ -33,6 +33,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.ScrollView;
 import android.widget.Space;
 import android.widget.Spinner;
@@ -300,7 +301,7 @@ public class MainActivity extends Activity {
         navigation.setVisibility(View.GONE);
         LinearLayout root = page("Клиенты", "Контакты и история", () -> showRoute("more"));
         LinearLayout body = bodyOf(scrollBody(root));
-        EditText search = field("Имя или телефон", InputType.TYPE_CLASS_TEXT | InputType.TYPE_CLASS_PHONE);
+        EditText search = field("Имя, телефон, марка или номер", InputType.TYPE_CLASS_TEXT);
         body.addView(labeled(search));
         LinearLayout clientList = new LinearLayout(this);
         clientList.setOrientation(LinearLayout.VERTICAL);
@@ -324,9 +325,14 @@ public class MainActivity extends Activity {
         for (Models.Client client : store.clients) {
             String nameValue = client.name == null ? "" : client.name;
             String phoneValue = client.phone == null ? "" : client.phone;
+            String carValue = client.car == null ? "" : client.car;
+            String plateValue = client.plate == null ? "" : client.plate;
             boolean matches = normalized.isEmpty()
                     || nameValue.toLowerCase(ru).contains(normalized)
-                    || (!digits.isEmpty() && phoneValue.replaceAll("[^0-9]", "").contains(digits));
+                    || carValue.toLowerCase(ru).contains(normalized)
+                    || plateValue.toLowerCase(ru).contains(normalized)
+                    || (!digits.isEmpty() && (phoneValue.replaceAll("[^0-9]", "").contains(digits)
+                    || plateValue.replaceAll("[^0-9]", "").contains(digits)));
             if (!matches) continue;
             visible++;
             LinearLayout card = card();
@@ -335,7 +341,7 @@ public class MainActivity extends Activity {
             addRipple(card);
             TextView name = text(client.name, 18, INK, Typeface.BOLD);
             card.addView(name);
-            card.addView(text(client.car, 15, MUTED, Typeface.NORMAL), topMargin(-1, 5));
+            card.addView(text(vehicle(client.car, client.plate), 15, MUTED, Typeface.NORMAL), topMargin(-1, 5));
             card.addView(text(client.phone, 14, BLUE, Typeface.NORMAL), topMargin(-1, 10));
             int count = 0; long total = 0;
             for (Models.Order order : store.orders) if (order.clientId.equals(client.id)) { count++; total += order.total; }
@@ -344,7 +350,7 @@ public class MainActivity extends Activity {
         }
         if (visible == 0) {
             clientList.addView(emptyCard(normalized.isEmpty() ? "Клиентов пока нет" : "Ничего не найдено",
-                    normalized.isEmpty() ? "Клиент добавится вместе с первым заказом." : "Проверьте имя или номер телефона."));
+                    normalized.isEmpty() ? "Клиент добавится вместе с первым заказом." : "Проверьте имя, телефон, марку или госномер."));
         }
     }
 
@@ -354,6 +360,7 @@ public class MainActivity extends Activity {
         body.addView(actionCard("Клиенты", "Контакты и история заказов", () -> showClients()));
         body.addView(actionCard("История заказов", "Поиск по заказам и клиентам", () -> showOrderHistory()), topMargin(-1, 12));
         body.addView(actionCard("Услуги", "Названия, цены и длительность", () -> showServices()), topMargin(-1, 12));
+        body.addView(actionCard("Марки автомобилей", "Справочник для быстрого ввода", () -> showCarMakes()), topMargin(-1, 12));
         body.addView(actionCard("Обновления", "Проверка новых версий через GitHub", () -> showUpdates()), topMargin(-1, 12));
         body.addView(actionCard("О приложении", "DetailFlow " + updateManager.currentVersion() + " • данные хранятся на телефоне", () ->
                 message("DetailFlow", "Автономное приложение для управления детейлингом. Интернет и регистрация не требуются.")), topMargin(-1, 12));
@@ -364,7 +371,7 @@ public class MainActivity extends Activity {
         navigation.setVisibility(View.GONE);
         LinearLayout root = page("История заказов", "Все записи в одном месте", () -> showRoute("more"));
         LinearLayout body = bodyOf(scrollBody(root));
-        EditText search = field("Клиент, телефон, авто или № заказа", InputType.TYPE_CLASS_TEXT);
+        EditText search = field("Клиент, телефон, марка, номер или № заказа", InputType.TYPE_CLASS_TEXT);
         body.addView(labeled(search));
         LinearLayout historyList = new LinearLayout(this);
         historyList.setOrientation(LinearLayout.VERTICAL);
@@ -388,17 +395,75 @@ public class MainActivity extends Activity {
         orders.sort((a, b) -> Long.compare(b.startAt, a.startAt));
         int visible = 0;
         for (Models.Order order : orders) {
-            String searchable = (order.id + " " + order.clientName + " " + order.phone + " " + order.car + " " + order.status).toLowerCase(ru);
+            String searchable = (order.id + " " + order.clientName + " " + order.phone + " " + order.car + " " + order.plate + " " + order.status).toLowerCase(ru);
             boolean matches = normalized.isEmpty() || searchable.contains(normalized)
-                    || (!digits.isEmpty() && (order.phone.replaceAll("[^0-9]", "").contains(digits) || order.id.contains(digits)));
+                    || (!digits.isEmpty() && (order.phone.replaceAll("[^0-9]", "").contains(digits)
+                    || order.plate.replaceAll("[^0-9]", "").contains(digits) || order.id.contains(digits)));
             if (!matches) continue;
             visible++;
             historyList.addView(orderHistoryCard(order), topMargin(-1, 12));
         }
         if (visible == 0) {
             historyList.addView(emptyCard(orders.isEmpty() ? "Заказов пока нет" : "Ничего не найдено",
-                    orders.isEmpty() ? "Создайте первую запись — она появится здесь." : "Попробуйте имя, телефон, автомобиль или номер заказа."));
+                    orders.isEmpty() ? "Создайте первую запись — она появится здесь." : "Попробуйте имя, телефон, марку, госномер или номер заказа."));
         }
+    }
+
+    private void showCarMakes() {
+        navigation.setVisibility(View.GONE);
+        LinearLayout root = page("Марки автомобилей", "Справочник для быстрого ввода", () -> showRoute("more"));
+        LinearLayout body = bodyOf(scrollBody(root));
+        Button add = primaryButton("+  Добавить марку");
+        add.setOnClickListener(view -> editCarMake(null));
+        body.addView(add);
+        body.addView(text("Марки из справочника появляются подсказками при создании заказа.", 14, MUTED, Typeface.NORMAL), topMargin(-1, 14));
+        if (store.carMakes.isEmpty()) {
+            body.addView(emptyCard("Справочник пуст", "Добавьте первую марку автомобиля."), topMargin(-1, 12));
+        }
+        for (String carMake : new ArrayList<>(store.carMakes)) {
+            LinearLayout item = card();
+            item.setClickable(true);
+            item.setFocusable(true);
+            item.setContentDescription("Изменить марку " + carMake);
+            item.setOnClickListener(view -> editCarMake(carMake));
+            addRipple(item);
+            item.addView(text(carMake, 17, INK, Typeface.BOLD));
+            item.addView(text("Нажмите, чтобы изменить", 12, BLUE, Typeface.NORMAL), topMargin(-1, 6));
+            body.addView(item, topMargin(-1, 10));
+        }
+        setPage(root);
+    }
+
+    private void editCarMake(String existing) {
+        LinearLayout form = dialogForm();
+        EditText make = field("Марка автомобиля", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        if (existing != null) make.setText(existing);
+        form.addView(labeled(make));
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(existing == null ? "Новая марка" : "Изменить марку")
+                .setView(form)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сохранить", null);
+        if (existing != null) builder.setNeutralButton("Удалить", null);
+        AlertDialog dialog = builder.create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                String value = make.getText().toString().trim();
+                if (value.isEmpty()) { make.setError("Укажите марку"); return; }
+                boolean saved = existing == null ? store.addCarMake(value) : store.renameCarMake(existing, value);
+                if (!saved) { make.setError("Такая марка уже есть"); return; }
+                store.save();
+                dialog.dismiss();
+                showCarMakes();
+            });
+            if (existing != null) dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
+                store.carMakes.remove(existing);
+                store.save();
+                dialog.dismiss();
+                showCarMakes();
+            });
+        });
+        showStyledDialog(dialog);
     }
 
     private void showUpdates() {
@@ -527,7 +592,7 @@ public class MainActivity extends Activity {
         Models.Client client = store.clientById(clientId);
         if (client == null) return;
         navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Клиент", client.car, () -> showClients());
+        LinearLayout root = page("Клиент", vehicle(client.car, client.plate), () -> showClients());
         LinearLayout body = bodyOf(scrollBody(root));
         LinearLayout profile = cardWithColor(Color.rgb(239, 246, 255));
         LinearLayout identity = new LinearLayout(this);
@@ -543,8 +608,15 @@ public class MainActivity extends Activity {
         details.addView(text(client.phone.isEmpty() ? "Телефон не указан" : client.phone, 15, MUTED, Typeface.NORMAL), topMargin(-1, 5));
         identity.addView(details, leftMargin(-1, 14, 1));
         profile.addView(identity);
-        profile.addView(text(client.car, 15, BLUE_DARK, Typeface.BOLD), topMargin(-1, 14));
+        profile.addView(text(vehicle(client.car, client.plate), 15, BLUE_DARK, Typeface.BOLD), topMargin(-1, 14));
+        if (!client.carNote.isEmpty()) {
+            profile.addView(text("Примечание", 12, MUTED, Typeface.BOLD), topMargin(-1, 12));
+            profile.addView(text(client.carNote, 14, INK, Typeface.NORMAL), topMargin(-1, 4));
+        }
         body.addView(profile);
+        Button editVehicle = outlineButton("Изменить автомобиль", BLUE);
+        editVehicle.setOnClickListener(view -> editClientVehicle(client));
+        body.addView(editVehicle, topMargin(-1, 12));
 
         LinearLayout actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL);
         Button call = outlineButton("Позвонить", BLUE);
@@ -580,6 +652,39 @@ public class MainActivity extends Activity {
         setPage(root);
     }
 
+    private void editClientVehicle(Models.Client client) {
+        LinearLayout form = dialogForm();
+        AutoCompleteTextView car = autoCompleteField("Марка автомобиля", store.carMakes);
+        EditText plate = field("Госномер (если известен)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        EditText note = multilineField("Примечание к автомобилю");
+        car.setText(client.car);
+        plate.setText(client.plate);
+        note.setText(client.carNote);
+        LinearLayout vehicleSection = dialogSection("Автомобиль клиента");
+        vehicleSection.addView(labeled(car), topMargin(-1, 8));
+        vehicleSection.addView(labeled(plate), topMargin(-1, 8));
+        vehicleSection.addView(labeled(note), topMargin(-1, 8));
+        form.addView(vehicleSection);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Изменить автомобиль")
+                .setView(form)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сохранить", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String carValue = car.getText().toString().trim();
+            if (carValue.isEmpty()) { car.setError("Укажите марку"); return; }
+            client.car = carValue;
+            client.plate = plate.getText().toString().trim().toUpperCase(ru);
+            client.carNote = note.getText().toString().trim();
+            store.addCarMake(carValue);
+            store.save();
+            dialog.dismiss();
+            showClientDetail(client.id);
+        }));
+        showStyledDialog(dialog);
+    }
+
     private void showOrderDetail(String orderId) {
         Models.Order order = store.orderById(orderId);
         if (order == null) return;
@@ -588,7 +693,8 @@ public class MainActivity extends Activity {
         LinearLayout body = bodyOf(scrollBody(root));
 
         LinearLayout identity = card();
-        identity.addView(text(order.clientName + " • " + order.car, 18, INK, Typeface.BOLD));
+        identity.addView(text(order.clientName + " • " + vehicle(order.car, order.plate), 18, INK, Typeface.BOLD));
+        if (!order.carNote.isEmpty()) identity.addView(text(order.carNote, 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
         identity.addView(text("Начало: " + dateTime.format(new Date(order.startAt)), 14, MUTED, Typeface.NORMAL), topMargin(-1, 8));
         identity.addView(text("Дедлайн: " + dateTime.format(new Date(order.deadlineAt)), 14,
                 order.deadlineAt < System.currentTimeMillis() && !order.status.equals("Завершено") ? RED : MUTED, Typeface.NORMAL), topMargin(-1, 4));
@@ -668,7 +774,9 @@ public class MainActivity extends Activity {
 
         EditText name = field("Имя клиента", InputType.TYPE_CLASS_TEXT);
         EditText phone = field("Телефон", InputType.TYPE_CLASS_PHONE);
-        EditText car = field("Автомобиль и номер", InputType.TYPE_CLASS_TEXT);
+        AutoCompleteTextView car = autoCompleteField("Марка автомобиля", store.carMakes);
+        EditText plate = field("Госномер (если известен)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        EditText carNote = multilineField("Примечание к автомобилю");
 
         LinearLayout clientSection = dialogSection("Клиент");
         TextView clientState = text("", 14, BLUE_DARK, Typeface.BOLD);
@@ -678,11 +786,17 @@ public class MainActivity extends Activity {
         clientSection.addView(clientState, topMargin(-1, 8));
         clientSection.addView(labeled(name), topMargin(-1, 10));
         clientSection.addView(labeled(phone), topMargin(-1, 8));
-        clientSection.addView(labeled(car), topMargin(-1, 8));
         LinearLayout clientSuggestions = new LinearLayout(this);
         clientSuggestions.setOrientation(LinearLayout.VERTICAL);
         clientSection.addView(clientSuggestions, topMargin(-1, 4));
         form.addView(clientSection);
+
+        LinearLayout vehicleSection = dialogSection("Автомобиль");
+        vehicleSection.addView(text("Начните вводить марку или выберите её из справочника.", 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        vehicleSection.addView(labeled(car), topMargin(-1, 10));
+        vehicleSection.addView(labeled(plate), topMargin(-1, 8));
+        vehicleSection.addView(labeled(carNote), topMargin(-1, 8));
+        form.addView(vehicleSection, topMargin(-1, 12));
 
         Models.Client[] selectedClient = {preset};
         boolean[] updatingClient = {false};
@@ -690,15 +804,15 @@ public class MainActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence value, int start, int before, int count) { }
             @Override public void afterTextChanged(Editable value) {
-                refreshClientMatch(name, phone, car, clientState, clientSuggestions, selectedClient, updatingClient);
+                refreshClientMatch(name, phone, car, plate, carNote, clientState, clientSuggestions, selectedClient, updatingClient);
             }
         };
         name.addTextChangedListener(clientWatcher);
         phone.addTextChangedListener(clientWatcher);
         if (preset == null) {
-            refreshClientMatch(name, phone, car, clientState, clientSuggestions, selectedClient, updatingClient);
+            refreshClientMatch(name, phone, car, plate, carNote, clientState, clientSuggestions, selectedClient, updatingClient);
         } else {
-            applyClientSelection(preset, name, phone, car, clientState, clientSuggestions, selectedClient, updatingClient);
+            applyClientSelection(preset, name, phone, car, plate, carNote, clientState, clientSuggestions, selectedClient, updatingClient);
         }
 
         LinearLayout workSection = dialogSection("Работы");
@@ -732,6 +846,8 @@ public class MainActivity extends Activity {
             String clientName = name.getText().toString().trim();
             String phoneText = phone.getText().toString().trim();
             String carText = car.getText().toString().trim();
+            String plateText = plate.getText().toString().trim().toUpperCase(ru);
+            String carNoteText = carNote.getText().toString().trim();
             List<Models.Service> chosen = new ArrayList<>();
             for (Map.Entry<CheckBox, Models.Service> entry : selections.entrySet()) if (entry.getKey().isChecked()) chosen.add(entry.getValue());
             if (clientName.isEmpty()) { name.setError("Укажите имя"); return; }
@@ -740,16 +856,18 @@ public class MainActivity extends Activity {
 
             Models.Client client = selectedClient[0] != null ? selectedClient[0] : store.findClientByNameOrPhone(clientName, phoneText);
             if (client == null) {
-                client = new Models.Client(store.newId(), clientName, phoneText, carText);
+                client = new Models.Client(store.newId(), clientName, phoneText, carText, plateText, carNoteText);
                 store.clients.add(client);
             } else {
                 client.name = clientName; client.phone = phoneText; client.car = carText;
+                client.plate = plateText; client.carNote = carNoteText;
             }
+            store.addCarMake(carText);
             long total = 0; int minutes = 0;
             for (Models.Service service : chosen) { total += service.price; minutes += service.durationMinutes; }
             long start = selected.getTimeInMillis();
             String number = String.valueOf(100 + store.orders.size() + 1);
-            Models.Order order = new Models.Order(number, client.id, client.name, client.phone, client.car,
+            Models.Order order = new Models.Order(number, client.id, client.name, client.phone, client.car, client.plate, client.carNote,
                     total, start, start + minutes * 60000L, "Запланировано", false);
             for (Models.Service service : chosen) order.serviceIds.add(service.id);
             store.orders.add(order); store.sortOrders(); store.save();
@@ -759,7 +877,7 @@ public class MainActivity extends Activity {
         showStyledDialog(dialog);
     }
 
-    private void refreshClientMatch(EditText name, EditText phone, EditText car,
+    private void refreshClientMatch(EditText name, EditText phone, EditText car, EditText plate, EditText carNote,
                                     TextView clientState, LinearLayout suggestions,
                                     Models.Client[] selectedClient, boolean[] updatingClient) {
         if (updatingClient[0]) return;
@@ -779,7 +897,7 @@ public class MainActivity extends Activity {
             if (similarName || similarPhone) similar.add(client);
         }
         if (exact.size() == 1) {
-            applyClientSelection(exact.get(0), name, phone, car, clientState, suggestions, selectedClient, updatingClient);
+            applyClientSelection(exact.get(0), name, phone, car, plate, carNote, clientState, suggestions, selectedClient, updatingClient);
             return;
         }
 
@@ -805,17 +923,19 @@ public class MainActivity extends Activity {
             suggestion.setClickable(true);
             suggestion.setFocusable(true);
             suggestion.setContentDescription("Выбрать клиента " + client.name);
-            suggestion.setOnClickListener(view -> applyClientSelection(client, name, phone, car,
+            suggestion.setOnClickListener(view -> applyClientSelection(client, name, phone, car, plate, carNote,
                     clientState, suggestions, selectedClient, updatingClient));
             addRipple(suggestion);
             suggestion.addView(text(client.name, 15, INK, Typeface.BOLD));
-            String detail = client.phone.isEmpty() ? client.car : client.phone + (client.car.isEmpty() ? "" : " • " + client.car);
+            String vehicle = vehicle(client.car, client.plate);
+            String detail = client.phone.isEmpty() ? vehicle : client.phone + (vehicle.isEmpty() ? "" : " • " + vehicle);
             if (!detail.isEmpty()) suggestion.addView(text(detail, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
             suggestions.addView(suggestion, topMargin(-1, 8));
         }
     }
 
     private void applyClientSelection(Models.Client client, EditText name, EditText phone, EditText car,
+                                      EditText plate, EditText carNote,
                                       TextView clientState, LinearLayout suggestions,
                                       Models.Client[] selectedClient, boolean[] updatingClient) {
         updatingClient[0] = true;
@@ -823,6 +943,8 @@ public class MainActivity extends Activity {
         name.setText(client.name);
         phone.setText(client.phone);
         car.setText(client.car);
+        plate.setText(client.plate);
+        carNote.setText(client.carNote);
         updatingClient[0] = false;
         suggestions.removeAllViews();
         clientState.setText("Клиент из базы • " + client.name);
@@ -900,7 +1022,7 @@ public class MainActivity extends Activity {
             orders.sort((a, b) -> Long.compare(b.startAt, a.startAt));
             int selectedIndex = 0;
             for (Models.Order order : orders) {
-                orderNames.add("Заказ #" + order.id + " • " + order.car);
+                orderNames.add("Заказ #" + order.id + " • " + vehicle(order.car, order.plate));
                 orderIds.add(order.id);
                 if (presetOrder != null && presetOrder.id.equals(order.id)) selectedIndex = orderIds.size() - 1;
             }
@@ -994,7 +1116,7 @@ public class MainActivity extends Activity {
         addRipple(card);
         LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
         top.addView(text(time.format(new Date(order.startAt)), 20, BLUE, Typeface.BOLD));
-        TextView car = text(order.car, 17, INK, Typeface.BOLD); top.addView(car, leftMargin(0, 14, 1));
+        TextView car = text(vehicle(order.car, order.plate), 17, INK, Typeface.BOLD); top.addView(car, leftMargin(0, 14, 1));
         card.addView(top);
         card.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
         card.addView(statusPill(order.status), topMargin(-1, 11));
@@ -1016,7 +1138,8 @@ public class MainActivity extends Activity {
         top.addView(number, leftMargin(0, 12, 1));
         card.addView(top);
 
-        String identity = order.clientName + (order.car.isEmpty() ? "" : " • " + order.car);
+        String vehicle = vehicle(order.car, order.plate);
+        String identity = order.clientName + (vehicle.isEmpty() ? "" : " • " + vehicle);
         card.addView(text(identity, 17, INK, Typeface.BOLD), topMargin(-1, 9));
         if (!order.phone.isEmpty()) card.addView(text(order.phone, 14, MUTED, Typeface.NORMAL), topMargin(-1, 5));
         card.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 7));
@@ -1029,7 +1152,7 @@ public class MainActivity extends Activity {
         item.setBackground(rounded(Color.rgb(239, 246, 255), 16, 1, Color.rgb(147, 197, 253)));
         item.setOnClickListener(view -> showOrderDetail(order.id)); item.setClickable(true);
         addRipple(item);
-        item.addView(text(time.format(new Date(order.startAt)) + "  •  " + order.car, 17, INK, Typeface.BOLD));
+        item.addView(text(time.format(new Date(order.startAt)) + "  •  " + vehicle(order.car, order.plate), 17, INK, Typeface.BOLD));
         item.addView(text(serviceNames(order), 14, MUTED, Typeface.NORMAL), topMargin(-1, 6));
         return item;
     }
@@ -1088,7 +1211,7 @@ public class MainActivity extends Activity {
         String detail = dateTime.format(new Date(transaction.createdAt));
         if (!transaction.orderId.isEmpty()) {
             Models.Order order = store.orderById(transaction.orderId);
-            detail += order == null ? " • Заказ #" + transaction.orderId : " • Заказ #" + order.id + " • " + order.car;
+            detail += order == null ? " • Заказ #" + transaction.orderId : " • Заказ #" + order.id + " • " + vehicle(order.car, order.plate);
         } else if (!transaction.income) {
             detail += " • Без заказа";
         }
@@ -1134,6 +1257,33 @@ public class MainActivity extends Activity {
         EditText input = new EditText(this); input.setHint(hint); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setTextSize(16); input.setSingleLine(true);
         input.setId(View.generateViewId());
         input.setInputType(inputType); input.setPadding(dp(14), 0, dp(14), 0); input.setBackground(rounded(SURFACE, 12, 1, BORDER)); input.setMinHeight(dp(56));
+        return input;
+    }
+
+    private AutoCompleteTextView autoCompleteField(String hint, List<String> values) {
+        AutoCompleteTextView input = new AutoCompleteTextView(this);
+        input.setHint(hint); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setTextSize(16); input.setSingleLine(true);
+        input.setId(View.generateViewId());
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setPadding(dp(14), 0, dp(14), 0); input.setBackground(rounded(SURFACE, 12, 1, BORDER)); input.setMinHeight(dp(56));
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, new ArrayList<>(values));
+        input.setAdapter(adapter);
+        input.setThreshold(0);
+        input.setDropDownHeight(dp(112));
+        input.setDropDownBackgroundDrawable(rounded(SURFACE, 12, 1, BORDER));
+        input.setOnClickListener(view -> input.postDelayed(input::showDropDown, 80));
+        input.setOnFocusChangeListener((view, focused) -> {
+            if (focused) input.postDelayed(input::showDropDown, 120);
+        });
+        return input;
+    }
+
+    private EditText multilineField(String hint) {
+        EditText input = field(hint, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        input.setSingleLine(false);
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setMinHeight(dp(88));
+        input.setPadding(dp(14), dp(12), dp(14), dp(12));
         return input;
     }
 
@@ -1189,6 +1339,13 @@ public class MainActivity extends Activity {
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private String money(long value) { return moneyFormat.format(value) + " ₽"; }
+
+    private String vehicle(String make, String plate) {
+        String safeMake = make == null ? "" : make.trim();
+        String safePlate = plate == null ? "" : plate.trim();
+        if (safeMake.isEmpty()) return safePlate;
+        return safePlate.isEmpty() ? safeMake : safeMake + " • " + safePlate;
+    }
 
     private String duration(int minutes) {
         int hours = minutes / 60; int rest = minutes % 60;
@@ -1269,6 +1426,7 @@ public class MainActivity extends Activity {
         if (window != null) {
             window.setBackgroundDrawable(rounded(SURFACE, 24, 1, BORDER));
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             WindowManager.LayoutParams attributes = window.getAttributes();
             attributes.dimAmount = 0.46f;
             window.setAttributes(attributes);

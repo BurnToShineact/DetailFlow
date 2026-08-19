@@ -16,7 +16,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -24,6 +26,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -298,8 +301,35 @@ public class MainActivity extends Activity {
         navigation.setVisibility(View.GONE);
         LinearLayout root = page("Клиенты", "Контакты и история", () -> showRoute("more"));
         LinearLayout body = bodyOf(scrollBody(root));
-        if (store.clients.isEmpty()) body.addView(emptyCard("Клиентов пока нет", "Клиент добавится вместе с первым заказом."));
+        EditText search = field("Имя или телефон", InputType.TYPE_CLASS_TEXT | InputType.TYPE_CLASS_PHONE);
+        body.addView(labeled(search));
+        LinearLayout clientList = new LinearLayout(this);
+        clientList.setOrientation(LinearLayout.VERTICAL);
+        body.addView(clientList, topMargin(-1, 8));
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                renderClients(clientList, value == null ? "" : value.toString());
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        renderClients(clientList, "");
+        setPage(root);
+    }
+
+    private void renderClients(LinearLayout clientList, String query) {
+        clientList.removeAllViews();
+        String normalized = query.trim().toLowerCase(ru);
+        String digits = query.replaceAll("[^0-9]", "");
+        int visible = 0;
         for (Models.Client client : store.clients) {
+            String nameValue = client.name == null ? "" : client.name;
+            String phoneValue = client.phone == null ? "" : client.phone;
+            boolean matches = normalized.isEmpty()
+                    || nameValue.toLowerCase(ru).contains(normalized)
+                    || (!digits.isEmpty() && phoneValue.replaceAll("[^0-9]", "").contains(digits));
+            if (!matches) continue;
+            visible++;
             LinearLayout card = card();
             card.setClickable(true);
             card.setOnClickListener(view -> showClientDetail(client.id));
@@ -311,9 +341,12 @@ public class MainActivity extends Activity {
             int count = 0; long total = 0;
             for (Models.Order order : store.orders) if (order.clientId.equals(client.id)) { count++; total += order.total; }
             card.addView(text(count + " заказов • " + money(total), 13, MUTED, Typeface.NORMAL), topMargin(-1, 12));
-            body.addView(card, topMargin(-1, 12));
+            clientList.addView(card, topMargin(-1, 12));
         }
-        setPage(root);
+        if (visible == 0) {
+            clientList.addView(emptyCard(normalized.isEmpty() ? "Клиентов пока нет" : "Ничего не найдено",
+                    normalized.isEmpty() ? "Клиент добавится вместе с первым заказом." : "Проверьте имя или номер телефона."));
+        }
     }
 
     private void showMore() {
@@ -481,8 +514,25 @@ public class MainActivity extends Activity {
         actions.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
         actions.addView(sms, new LinearLayout.LayoutParams(0, dp(54), 1));
         body.addView(actions, topMargin(-1, 14));
-        body.addView(sectionTitle("История"), topMargin(-1, 24));
-        for (Models.Order order : store.orders) if (order.clientId.equals(client.id)) body.addView(orderCard(order), topMargin(-1, 10));
+        int orderCount = 0;
+        long orderTotal = 0;
+        List<Models.Order> history = new ArrayList<>();
+        for (Models.Order order : store.orders) {
+            if (!order.clientId.equals(client.id)) continue;
+            orderCount++;
+            orderTotal += order.total;
+            history.add(order);
+        }
+        history.sort((a, b) -> Long.compare(b.startAt, a.startAt));
+        LinearLayout summary = new LinearLayout(this);
+        summary.setOrientation(LinearLayout.HORIZONTAL);
+        summary.addView(metricCard("Заказов", String.valueOf(orderCount), BLUE), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        summary.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
+        summary.addView(metricCard("На сумму", money(orderTotal), GREEN), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        body.addView(summary, topMargin(-1, 18));
+        body.addView(sectionTitle("История заказов"), topMargin(-1, 24));
+        if (history.isEmpty()) body.addView(emptyCard("Заказов пока нет", "Создайте первую запись для этого клиента."), topMargin(-1, 10));
+        for (Models.Order order : history) body.addView(orderCard(order), topMargin(-1, 10));
         Button add = primaryButton("+  Новый заказ");
         add.setOnClickListener(view -> showNewOrderDialog(client));
         body.addView(add, topMargin(-1, 20));
@@ -574,27 +624,80 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(4), dp(4), dp(4), dp(8));
         scroll.addView(form);
+
         EditText name = field("Имя клиента", InputType.TYPE_CLASS_TEXT);
         EditText phone = field("Телефон", InputType.TYPE_CLASS_PHONE);
         EditText car = field("Автомобиль и номер", InputType.TYPE_CLASS_TEXT);
-        if (preset != null) { name.setText(preset.name); phone.setText(preset.phone); car.setText(preset.car); }
-        form.addView(labeled(name)); form.addView(labeled(phone), topMargin(-1, 8)); form.addView(labeled(car), topMargin(-1, 8));
-        form.addView(sectionTitle("Работы"), topMargin(-1, 18));
+
+        List<Models.Client> clientChoices = new ArrayList<>();
+        clientChoices.add(null);
+        List<String> clientNames = new ArrayList<>();
+        clientNames.add("Новый клиент — заполнить вручную");
+        List<Models.Client> sortedClients = new ArrayList<>(store.clients);
+        sortedClients.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
+        int presetIndex = 0;
+        for (Models.Client client : sortedClients) {
+            clientChoices.add(client);
+            clientNames.add(client.name + (client.phone.isEmpty() ? "" : " • " + client.phone));
+            if (preset != null && preset.id.equals(client.id)) presetIndex = clientChoices.size() - 1;
+        }
+
+        LinearLayout clientSection = dialogSection("Клиент");
+        TextView clientLabel = text("Клиент из базы", 13, MUTED, Typeface.BOLD);
+        clientSection.addView(clientLabel);
+        Spinner clientSpinner = new Spinner(this);
+        clientSpinner.setId(View.generateViewId());
+        clientSpinner.setContentDescription("Клиент из базы");
+        clientSpinner.setMinimumHeight(dp(56));
+        clientSpinner.setPadding(dp(10), 0, dp(10), 0);
+        clientSpinner.setBackground(rounded(SURFACE, 12, 1, BORDER));
+        ArrayAdapter<String> clientAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, clientNames);
+        clientAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        clientSpinner.setAdapter(clientAdapter);
+        clientLabel.setLabelFor(clientSpinner.getId());
+        clientSection.addView(clientSpinner, topMargin(-1, 5));
+        clientSection.addView(labeled(name), topMargin(-1, 10));
+        clientSection.addView(labeled(phone), topMargin(-1, 8));
+        clientSection.addView(labeled(car), topMargin(-1, 8));
+        form.addView(clientSection);
+
+        Models.Client[] selectedClient = {preset};
+        clientSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                Models.Client selected = clientChoices.get(position);
+                selectedClient[0] = selected;
+                boolean editable = selected == null;
+                name.setEnabled(editable); phone.setEnabled(editable); car.setEnabled(editable);
+                if (selected != null) {
+                    name.setText(selected.name); phone.setText(selected.phone); car.setText(selected.car);
+                } else if (preset == null || position == 0) {
+                    name.setText(""); phone.setText(""); car.setText("");
+                }
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        clientSpinner.setSelection(presetIndex);
+
+        LinearLayout workSection = dialogSection("Работы");
 
         Map<CheckBox, Models.Service> selections = new HashMap<>();
         for (Models.Service service : store.services) {
             CheckBox check = new CheckBox(this);
             check.setText(service.name + "\n" + money(service.price) + " • " + duration(service.durationMinutes));
             check.setTextColor(INK); check.setTextSize(15); check.setPadding(dp(4), dp(7), dp(4), dp(7)); check.setButtonTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{BLUE, MUTED}));
-            form.addView(check, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
+            workSection.addView(check, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
             selections.put(check, service);
         }
-        if (store.services.isEmpty()) form.addView(text("Сначала добавьте хотя бы одну услугу в разделе «Ещё». ", 14, RED, Typeface.NORMAL));
+        if (store.services.isEmpty()) workSection.addView(text("Сначала добавьте хотя бы одну услугу в разделе «Ещё». ", 14, RED, Typeface.NORMAL), topMargin(-1, 8));
+        form.addView(workSection, topMargin(-1, 12));
 
         Calendar selected = Calendar.getInstance(); selected.add(Calendar.HOUR_OF_DAY, 1); selected.set(Calendar.MINUTE, 0);
         Button when = outlineButton("Время: " + dateTime.format(selected.getTime()), BLUE);
         when.setOnClickListener(view -> chooseDateTime(selected, when));
-        form.addView(when, topMargin(-1, 12));
+        LinearLayout scheduleSection = dialogSection("Время записи");
+        scheduleSection.addView(text("Начало и дедлайн рассчитываются по длительности выбранных работ.", 13, MUTED, Typeface.NORMAL));
+        scheduleSection.addView(when, topMargin(-1, 9));
+        form.addView(scheduleSection, topMargin(-1, 12));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Новая запись")
@@ -612,7 +715,7 @@ public class MainActivity extends Activity {
             if (carText.isEmpty()) { car.setError("Укажите автомобиль"); return; }
             if (chosen.isEmpty()) { toast("Выберите хотя бы одну работу"); return; }
 
-            Models.Client client = preset != null ? preset : store.findClient(phoneText, carText);
+            Models.Client client = selectedClient[0] != null ? selectedClient[0] : store.findClient(phoneText, carText);
             if (client == null) {
                 client = new Models.Client(store.newId(), clientName, phoneText, carText);
                 store.clients.add(client);
@@ -678,13 +781,17 @@ public class MainActivity extends Activity {
         LinearLayout form = dialogForm();
         EditText title = field(income ? "Источник дохода" : "На что потрачено", InputType.TYPE_CLASS_TEXT);
         EditText amount = field("Сумма, ₽", InputType.TYPE_CLASS_NUMBER);
-        form.addView(labeled(title)); form.addView(labeled(amount), topMargin(-1, 8));
+        LinearLayout operationSection = dialogSection("Операция");
+        operationSection.addView(labeled(title));
+        operationSection.addView(labeled(amount), topMargin(-1, 8));
+        form.addView(operationSection);
 
         List<String> orderIds = new ArrayList<>();
         Spinner orderSpinner = null;
         if (!income) {
+            LinearLayout orderSection = dialogSection("Связь с заказом");
             TextView orderLabel = text("Связать с заказом", 13, MUTED, Typeface.BOLD);
-            form.addView(orderLabel, topMargin(-1, 10));
+            orderSection.addView(orderLabel);
             orderSpinner = new Spinner(this);
             orderSpinner.setId(View.generateViewId());
             orderSpinner.setContentDescription("Заказ для расхода");
@@ -707,7 +814,8 @@ public class MainActivity extends Activity {
             orderSpinner.setAdapter(adapter);
             orderSpinner.setSelection(selectedIndex);
             orderLabel.setLabelFor(orderSpinner.getId());
-            form.addView(orderSpinner, topMargin(-1, 5));
+            orderSection.addView(orderSpinner, topMargin(-1, 5));
+            form.addView(orderSection, topMargin(-1, 12));
         }
         Spinner finalOrderSpinner = orderSpinner;
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(income ? "Добавить доход" : "Добавить расход")
@@ -917,6 +1025,7 @@ public class MainActivity extends Activity {
         CharSequence hint = input.getHint();
         TextView label = text(hint == null ? "Поле" : hint.toString(), 13, MUTED, Typeface.BOLD);
         label.setLabelFor(input.getId());
+        input.setHint("");
         wrapper.addView(label);
         wrapper.addView(input, topMargin(-1, 5));
         return wrapper;
@@ -924,6 +1033,15 @@ public class MainActivity extends Activity {
 
     private LinearLayout dialogForm() {
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(4), dp(6), dp(4), dp(6)); return form;
+    }
+
+    private LinearLayout dialogSection(String title) {
+        LinearLayout section = new LinearLayout(this);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.setPadding(dp(12), dp(12), dp(12), dp(14));
+        section.setBackground(rounded(Color.rgb(248, 250, 252), 18, 1, BORDER));
+        section.addView(text(title, 16, INK, Typeface.BOLD));
+        return section;
     }
 
     private TextView text(String value, float size, int color, int style) {

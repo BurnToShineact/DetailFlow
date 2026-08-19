@@ -17,6 +17,7 @@ final class AppStore {
     final List<Models.Order> orders = new ArrayList<>();
     final List<Models.Transaction> transactions = new ArrayList<>();
     final List<String> carMakes = new ArrayList<>();
+    final List<Models.CarModel> carModels = new ArrayList<>();
     private final SharedPreferences preferences;
 
     AppStore(Context context) {
@@ -38,6 +39,7 @@ final class AppStore {
             JSONArray ordersJson = root.optJSONArray("orders");
             JSONArray transactionsJson = root.optJSONArray("transactions");
             JSONArray carMakesJson = root.optJSONArray("carMakes");
+            JSONArray carModelsJson = root.optJSONArray("carModels");
             boolean carMakesReady = root.optBoolean("carMakesReady", false);
             if (servicesJson != null) for (int i = 0; i < servicesJson.length(); i++) services.add(Models.Service.fromJson(servicesJson.getJSONObject(i)));
             if (clientsJson != null) for (int i = 0; i < clientsJson.length(); i++) clients.add(Models.Client.fromJson(clientsJson.getJSONObject(i)));
@@ -45,11 +47,13 @@ final class AppStore {
             if (transactionsJson != null) for (int i = 0; i < transactionsJson.length(); i++) transactions.add(Models.Transaction.fromJson(transactionsJson.getJSONObject(i)));
             if (carMakesReady && carMakesJson != null) for (int i = 0; i < carMakesJson.length(); i++) addCarMake(carMakesJson.optString(i));
             else addDefaultCarMakes();
+            if (carModelsJson != null) for (int i = 0; i < carModelsJson.length(); i++) carModels.add(Models.CarModel.fromJson(carModelsJson.getJSONObject(i)));
         } catch (Exception ignored) {
-            services.clear(); clients.clear(); orders.clear(); transactions.clear(); carMakes.clear();
+            services.clear(); clients.clear(); orders.clear(); transactions.clear(); carMakes.clear(); carModels.clear();
             seed();
             save();
         }
+        linkCarModels();
         sortOrders();
         save();
     }
@@ -61,14 +65,16 @@ final class AppStore {
             JSONArray ordersJson = new JSONArray();
             JSONArray transactionsJson = new JSONArray();
             JSONArray carMakesJson = new JSONArray();
+            JSONArray carModelsJson = new JSONArray();
             for (Models.Service item : services) servicesJson.put(item.toJson());
             for (Models.Client item : clients) clientsJson.put(item.toJson());
             for (Models.Order item : orders) ordersJson.put(item.toJson());
             for (Models.Transaction item : transactions) transactionsJson.put(item.toJson());
             for (String item : carMakes) carMakesJson.put(item);
+            for (Models.CarModel item : carModels) carModelsJson.put(item.toJson());
             JSONObject root = new JSONObject().put("services", servicesJson).put("clients", clientsJson)
                     .put("orders", ordersJson).put("transactions", transactionsJson)
-                    .put("carMakes", carMakesJson).put("carMakesReady", true);
+                    .put("carMakes", carMakesJson).put("carMakesReady", true).put("carModels", carModelsJson);
             preferences.edit().putString("data", root.toString()).apply();
         } catch (Exception ignored) { }
     }
@@ -90,6 +96,55 @@ final class AppStore {
     Models.Client clientById(String id) {
         for (Models.Client item : clients) if (item.id.equals(id)) return item;
         return null;
+    }
+
+    Models.CarModel carModelById(String id) {
+        for (Models.CarModel item : carModels) if (item.id.equals(id)) return item;
+        return null;
+    }
+
+    List<Models.CarModel> carModelsForMake(String make) {
+        List<Models.CarModel> result = new ArrayList<>();
+        for (Models.CarModel item : carModels) if (item.make.equalsIgnoreCase(make)) result.add(item);
+        result.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
+        return result;
+    }
+
+    Models.CarModel findCarModel(String make, String name) {
+        for (Models.CarModel item : carModels) {
+            if (item.make.equalsIgnoreCase(make.trim()) && item.name.equalsIgnoreCase(name.trim())) return item;
+        }
+        return null;
+    }
+
+    Models.CarModel ensureCarModel(String make, String name) {
+        String safeMake = make == null ? "" : make.trim();
+        String safeName = name == null ? "" : name.trim();
+        if (safeMake.isEmpty() || safeName.isEmpty()) return null;
+        Models.CarModel existing = findCarModel(safeMake, safeName);
+        if (existing != null) return existing;
+        addCarMake(safeMake);
+        Models.CarModel model = new Models.CarModel(newId(), safeMake, safeName, "");
+        carModels.add(model);
+        return model;
+    }
+
+    boolean updateCarModel(Models.CarModel model, String name, String note) {
+        String normalized = name == null ? "" : name.trim();
+        if (normalized.isEmpty()) return false;
+        Models.CarModel duplicate = findCarModel(model.make, normalized);
+        if (duplicate != null && !duplicate.id.equals(model.id)) return false;
+        model.name = normalized;
+        model.note = note == null ? "" : note.trim();
+        for (Models.Client client : clients) if (client.carModelId.equals(model.id)) client.carModel = normalized;
+        for (Models.Order order : orders) if (order.carModelId.equals(model.id)) order.carModel = normalized;
+        return true;
+    }
+
+    boolean carModelInUse(String modelId) {
+        for (Models.Client client : clients) if (client.carModelId.equals(modelId)) return true;
+        for (Models.Order order : orders) if (order.carModelId.equals(modelId)) return true;
+        return false;
     }
 
     Models.Client findClientByNameOrPhone(String name, String phone) {
@@ -131,6 +186,7 @@ final class AppStore {
         carMakes.set(index, normalized);
         for (Models.Client client : clients) if (client.car.equalsIgnoreCase(oldValue)) client.car = normalized;
         for (Models.Order order : orders) if (order.car.equalsIgnoreCase(oldValue)) order.car = normalized;
+        for (Models.CarModel model : carModels) if (model.make.equalsIgnoreCase(oldValue)) model.make = normalized;
         carMakes.sort(String.CASE_INSENSITIVE_ORDER);
         return true;
     }
@@ -140,6 +196,21 @@ final class AppStore {
                 "Hyundai", "Kia", "Lada", "Lexus", "Mazda", "Mercedes-Benz", "Mitsubishi", "Nissan",
                 "Renault", "Skoda", "Toyota", "Volkswagen"};
         for (String value : defaults) addCarMake(value);
+    }
+
+    private void linkCarModels() {
+        for (Models.Client client : clients) {
+            if (client.carModel.isEmpty()) continue;
+            Models.CarModel model = carModelById(client.carModelId);
+            if (model == null) model = ensureCarModel(client.car, client.carModel);
+            if (model != null) client.carModelId = model.id;
+        }
+        for (Models.Order order : orders) {
+            if (order.carModel.isEmpty()) continue;
+            Models.CarModel model = carModelById(order.carModelId);
+            if (model == null) model = ensureCarModel(order.car, order.carModel);
+            if (model != null) order.carModelId = model.id;
+        }
     }
 
     private void seed() {

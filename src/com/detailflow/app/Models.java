@@ -42,27 +42,57 @@ final class Models {
         String name;
         String phone;
         String car;
+        String carModelId;
+        String carModel;
         String plate;
-        String carNote;
+        String legacyCarNote;
 
-        Client(String id, String name, String phone, String car, String plate, String carNote) {
+        Client(String id, String name, String phone, String car, String carModelId, String carModel, String plate) {
             this.id = id;
             this.name = name;
             this.phone = phone;
             this.car = car;
+            this.carModelId = carModelId;
+            this.carModel = carModel;
             this.plate = plate;
-            this.carNote = carNote;
+            this.legacyCarNote = "";
         }
 
         JSONObject toJson() throws JSONException {
             return new JSONObject().put("id", id).put("name", name).put("phone", phone)
-                    .put("car", car).put("plate", plate).put("carNote", carNote);
+                    .put("car", car).put("carModelId", carModelId).put("carModel", carModel)
+                    .put("plate", plate).put("legacyCarNote", legacyCarNote);
         }
 
         static Client fromJson(JSONObject json) {
-            return new Client(json.optString("id"), json.optString("name"),
+            Client client = new Client(json.optString("id"), json.optString("name"),
                     json.optString("phone"), json.optString("car"),
-                    json.optString("plate"), json.optString("carNote"));
+                    json.optString("carModelId"), json.optString("carModel"), json.optString("plate"));
+            client.legacyCarNote = json.optString("legacyCarNote", json.optString("carNote"));
+            return client;
+        }
+    }
+
+    static final class CarModel {
+        String id;
+        String make;
+        String name;
+        String note;
+
+        CarModel(String id, String make, String name, String note) {
+            this.id = id;
+            this.make = make;
+            this.name = name;
+            this.note = note;
+        }
+
+        JSONObject toJson() throws JSONException {
+            return new JSONObject().put("id", id).put("make", make).put("name", name).put("note", note);
+        }
+
+        static CarModel fromJson(JSONObject json) {
+            return new CarModel(json.optString("id"), json.optString("make"),
+                    json.optString("name"), json.optString("note"));
         }
     }
 
@@ -72,8 +102,10 @@ final class Models {
         String clientName;
         String phone;
         String car;
+        String carModelId;
+        String carModel;
         String plate;
-        String carNote;
+        String orderNote;
         List<String> serviceIds = new ArrayList<>();
         long total;
         long startAt;
@@ -83,15 +115,18 @@ final class Models {
         List<String> beforeUris = new ArrayList<>();
         List<String> afterUris = new ArrayList<>();
 
-        Order(String id, String clientId, String clientName, String phone, String car, String plate, String carNote,
+        Order(String id, String clientId, String clientName, String phone, String car,
+              String carModelId, String carModel, String plate, String orderNote,
               long total, long startAt, long deadlineAt, String status, boolean paid) {
             this.id = id;
             this.clientId = clientId;
             this.clientName = clientName;
             this.phone = phone;
             this.car = car;
+            this.carModelId = carModelId;
+            this.carModel = carModel;
             this.plate = plate;
-            this.carNote = carNote;
+            this.orderNote = orderNote == null ? "" : orderNote;
             this.total = total;
             this.startAt = startAt;
             this.deadlineAt = deadlineAt;
@@ -108,7 +143,8 @@ final class Models {
             for (String uri : afterUris) after.put(uri);
             return new JSONObject().put("id", id).put("clientId", clientId)
                     .put("clientName", clientName).put("phone", phone).put("car", car)
-                    .put("plate", plate).put("carNote", carNote)
+                    .put("carModelId", carModelId).put("carModel", carModel)
+                    .put("plate", plate).put("orderNote", orderNote)
                     .put("serviceIds", ids).put("total", total).put("startAt", startAt)
                     .put("deadlineAt", deadlineAt).put("status", status).put("paid", paid)
                     .put("beforeUris", before).put("afterUris", after);
@@ -117,7 +153,8 @@ final class Models {
         static Order fromJson(JSONObject json) {
             Order order = new Order(json.optString("id"), json.optString("clientId"),
                     json.optString("clientName"), json.optString("phone"), json.optString("car"),
-                    json.optString("plate"), json.optString("carNote"),
+                    json.optString("carModelId"), json.optString("carModel"), json.optString("plate"),
+                    json.optString("orderNote", json.optString("carNote")),
                     json.optLong("total"), json.optLong("startAt"), json.optLong("deadlineAt"),
                     json.optString("status", "Запланировано"), json.optBoolean("paid"));
             JSONArray ids = json.optJSONArray("serviceIds");

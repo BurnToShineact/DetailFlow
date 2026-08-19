@@ -1,0 +1,14 @@
+# Android build outputs
+/build/
+/*.apk
+/*.apk.idsig
+
+# Signing material must never be committed
+/*.keystore
+/*.jks
+
+# Local tooling and editor files
+/.idea/
+*.iml
+.DS_Store
+*.log

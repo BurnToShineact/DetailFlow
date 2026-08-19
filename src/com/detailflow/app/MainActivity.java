@@ -1035,12 +1035,12 @@ public class MainActivity extends Activity {
         body.addView(row, topMargin(-1, 12));
 
         long outstanding = 0;
-        for (Models.Order order : store.orders) if (!order.paid) outstanding += order.total;
+        for (Models.Order order : store.orders) if (!order.paid) outstanding += orderBalance(order);
         body.addView(infoRow("Ожидается оплат", money(outstanding), AMBER), topMargin(-1, 14));
         body.addView(sectionTitle("Последние операции"), topMargin(-1, 24));
         List<FinanceEntry> entries = new ArrayList<>();
         for (Models.Transaction transaction : store.transactions) entries.add(new FinanceEntry(transaction));
-        for (Models.Order order : store.orders) if (order.paid) entries.add(new FinanceEntry(order));
+        for (Models.Order order : store.orders) if (order.paid && orderBalance(order) > 0) entries.add(new FinanceEntry(order));
         entries.sort((a, b) -> Long.compare(b.createdAt, a.createdAt));
         if (entries.isEmpty()) body.addView(emptyCard("Операций пока нет", "Здесь появятся доходы и расходы."), topMargin(-1, 10));
         for (FinanceEntry entry : entries) {
@@ -1232,6 +1232,28 @@ public class MainActivity extends Activity {
         }
         body.addView(infoRow("Итого", money(order.total), INK), topMargin(-1, 10));
 
+        long advance = orderAdvance(order);
+        long balance = orderBalance(order);
+        body.addView(sectionTitle("Оплата"), topMargin(-1, 22));
+        LinearLayout paymentSummary = card();
+        paymentSummary.addView(paymentPill(order));
+        if (advance > 0) paymentSummary.addView(text("Внесено авансом: " + money(advance), 15, INK, Typeface.BOLD), topMargin(-1, 10));
+        paymentSummary.addView(text(order.paid ? "Оплата по заказу закрыта" : "Осталось оплатить: " + money(balance),
+                14, order.paid ? GREEN : MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        body.addView(paymentSummary, topMargin(-1, 8));
+        if (!order.paid && balance > 0) {
+            Button addAdvance = outlineButton(advance > 0 ? "+ Добавить аванс" : "+ Внести аванс", GREEN);
+            addAdvance.setOnClickListener(view -> addAdvance(order, back));
+            body.addView(addAdvance, topMargin(-1, 10));
+            Button paid = outlineButton(advance > 0 ? "Остаток оплачен полностью" : "Отметить как оплаченный", BLUE);
+            paid.setOnClickListener(view -> {
+                order.paid = true;
+                store.save();
+                showOrderDetail(order.id, back);
+            });
+            body.addView(paid, topMargin(-1, 10));
+        }
+
         body.addView(sectionTitle("Расходы по заказу"), topMargin(-1, 22));
         long linkedExpenses = 0;
         for (Models.Transaction transaction : store.transactions) {
@@ -1256,11 +1278,33 @@ public class MainActivity extends Activity {
         Button status = primaryButton(nextStatusCaption(order.status));
         status.setOnClickListener(view -> { advanceStatus(order); store.save(); showOrderDetail(order.id, back); });
         body.addView(status, topMargin(-1, 22));
-        Button paid = outlineButton(order.paid ? "Оплата получена" : "Отметить как оплаченный", order.paid ? GREEN : BLUE);
-        paid.setEnabled(!order.paid);
-        paid.setOnClickListener(view -> { order.paid = true; store.save(); showOrderDetail(order.id, back); });
-        body.addView(paid, topMargin(-1, 10));
         setPage(root);
+    }
+
+    private void addAdvance(Models.Order order, Runnable back) {
+        long balance = orderBalance(order);
+        LinearLayout form = dialogForm();
+        LinearLayout section = dialogSection("Оплата заказа #" + order.id);
+        section.addView(text("Стоимость: " + money(order.total) + "  •  осталось: " + money(balance),
+                14, MUTED, Typeface.NORMAL));
+        EditText amount = field("Сумма аванса, ₽", InputType.TYPE_CLASS_NUMBER);
+        section.addView(labeled(amount), topMargin(-1, 10));
+        form.addView(section);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Внести аванс")
+                .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Внести", null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            long value = parseLong(amount.getText().toString());
+            if (value <= 0) { amount.setError("Укажите сумму аванса"); return; }
+            if (value > balance) { amount.setError("Не больше " + money(balance)); return; }
+            store.transactions.add(new Models.Transaction(store.newId(), "Аванс по заказу #" + order.id,
+                    value, System.currentTimeMillis(), true, order.id, "advance"));
+            if (value == balance) order.paid = true;
+            store.save();
+            dialog.dismiss();
+            toast(value == balance ? "Заказ оплачен полностью" : "Аванс внесён");
+            showOrderDetail(order.id, back);
+        }));
+        showStyledDialog(dialog);
     }
 
     private void editOrderNote(Models.Order order, Runnable back) {
@@ -1789,15 +1833,17 @@ public class MainActivity extends Activity {
         addRipple(card);
         LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
         top.addView(text("Заказ #" + order.id, 18, BLUE, Typeface.BOLD));
-        TextView schedule = text(dateTime.format(new Date(order.startAt)), 13, MUTED, Typeface.BOLD);
+        TextView schedule = text(dateTime.format(new Date(order.startAt)), 17, INK, Typeface.BOLD);
         schedule.setGravity(Gravity.END);
         top.addView(schedule, leftMargin(0, 12, 1));
         card.addView(top);
+        TextView services = text(serviceNames(order), 15, BLUE_DARK, Typeface.BOLD);
+        services.setGravity(Gravity.END);
+        card.addView(services, topMargin(-1, 7));
         String car = vehicle(order.car, order.carModel, order.plate);
         card.addView(text(car.isEmpty() ? "Автомобиль не указан" : car, 15, INK, Typeface.BOLD), topMargin(-1, 9));
         card.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
-        card.addView(text(serviceNames(order), 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
-        card.addView(statusPill(order.status), topMargin(-1, 11));
+        card.addView(cardStatusRow(order), topMargin(-1, 11));
         return card;
     }
 
@@ -1811,17 +1857,20 @@ public class MainActivity extends Activity {
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.addView(text("Заказ #" + order.id, 18, BLUE, Typeface.BOLD));
-        TextView schedule = text(dateTime.format(new Date(order.startAt)), 13, MUTED, Typeface.BOLD);
+        TextView schedule = text(dateTime.format(new Date(order.startAt)), 17, INK, Typeface.BOLD);
         schedule.setGravity(Gravity.END);
         top.addView(schedule, leftMargin(0, 12, 1));
         card.addView(top);
+
+        TextView services = text(serviceNames(order), 15, BLUE_DARK, Typeface.BOLD);
+        services.setGravity(Gravity.END);
+        card.addView(services, topMargin(-1, 7));
 
         String vehicle = vehicle(order.car, order.carModel, order.plate);
         card.addView(text(vehicle.isEmpty() ? "Автомобиль не указан" : vehicle, 15, INK, Typeface.BOLD), topMargin(-1, 9));
         card.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
         if (!order.phone.isEmpty()) card.addView(text(order.phone, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
-        card.addView(text(serviceNames(order), 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
-        card.addView(statusPill(order.status), topMargin(-1, 11));
+        card.addView(cardStatusRow(order), topMargin(-1, 11));
         return card;
     }
 
@@ -1834,15 +1883,28 @@ public class MainActivity extends Activity {
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.addView(text("Заказ #" + order.id, 17, BLUE, Typeface.BOLD));
-        TextView schedule = text(time.format(new Date(order.startAt)), 15, INK, Typeface.BOLD);
+        TextView schedule = text(time.format(new Date(order.startAt)), 18, INK, Typeface.BOLD);
         schedule.setGravity(Gravity.END);
         top.addView(schedule, leftMargin(0, 12, 1));
         item.addView(top);
+        TextView services = text(serviceNames(order), 15, BLUE_DARK, Typeface.BOLD);
+        services.setGravity(Gravity.END);
+        item.addView(services, topMargin(-1, 7));
         String car = vehicle(order.car, order.carModel, order.plate);
         item.addView(text(car.isEmpty() ? "Автомобиль не указан" : car, 15, INK, Typeface.BOLD), topMargin(-1, 8));
         item.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
-        item.addView(text(serviceNames(order), 13, MUTED, Typeface.NORMAL), topMargin(-1, 6));
+        item.addView(cardStatusRow(order), topMargin(-1, 10));
         return item;
+    }
+
+    private LinearLayout cardStatusRow(Models.Order order) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(statusPill(order.status));
+        row.addView(new Space(this), new LinearLayout.LayoutParams(dp(8), 1));
+        row.addView(paymentPill(order));
+        return row;
     }
 
     private LinearLayout freeSlot(String range) {
@@ -1860,8 +1922,22 @@ public class MainActivity extends Activity {
         pill.setGravity(Gravity.CENTER);
         pill.setBackground(rounded(withAlpha(color, 22), 12, 0, Color.TRANSPARENT));
         pill.setPadding(dp(12), dp(7), dp(12), dp(7));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36));
+        pill.setMinHeight(dp(36));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pill.setLayoutParams(lp);
+        return pill;
+    }
+
+    private TextView paymentPill(Models.Order order) {
+        long advance = orderAdvance(order);
+        String caption = order.paid ? "Оплачено" : advance > 0 ? "Аванс " + money(advance) : "Не оплачено";
+        int color = order.paid ? GREEN : advance > 0 ? BLUE_DARK : MUTED;
+        TextView pill = text(caption, 13, color, Typeface.BOLD);
+        pill.setGravity(Gravity.CENTER);
+        pill.setBackground(rounded(withAlpha(color, 20), 12, 0, Color.TRANSPARENT));
+        pill.setPadding(dp(12), dp(7), dp(12), dp(7));
+        pill.setMinHeight(dp(36));
+        pill.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return pill;
     }
 
@@ -1919,7 +1995,7 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(text("Заказ #" + order.id + " • " + order.clientName, 15, INK, Typeface.BOLD),
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        row.addView(text("+" + money(order.total), 15, GREEN, Typeface.BOLD));
+        row.addView(text("+" + money(orderBalance(order)), 15, GREEN, Typeface.BOLD));
         item.addView(row);
         String detail = dateTime.format(new Date(order.startAt)) + " • Оплаченный заказ";
         String car = vehicle(order.car, order.carModel, order.plate);
@@ -2166,8 +2242,20 @@ public class MainActivity extends Activity {
 
     private long monthRevenue() {
         long value = 0;
-        for (Models.Order order : store.orders) if (order.paid && sameMonth(order.startAt, System.currentTimeMillis())) value += order.total;
+        for (Models.Order order : store.orders) if (order.paid && sameMonth(order.startAt, System.currentTimeMillis())) value += orderBalance(order);
         return value;
+    }
+
+    private long orderAdvance(Models.Order order) {
+        long value = 0;
+        for (Models.Transaction transaction : store.transactions) {
+            if (transaction.income && order.id.equals(transaction.orderId) && "advance".equals(transaction.kind)) value += transaction.amount;
+        }
+        return Math.min(value, order.total);
+    }
+
+    private long orderBalance(Models.Order order) {
+        return Math.max(0, order.total - orderAdvance(order));
     }
 
     private int monthOrders() {

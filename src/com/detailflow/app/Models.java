@@ -178,25 +178,31 @@ final class Models {
         long createdAt;
         boolean income;
         String orderId;
+        String kind;
 
         Transaction(String id, String title, long amount, long createdAt, boolean income, String orderId) {
+            this(id, title, amount, createdAt, income, orderId, "");
+        }
+
+        Transaction(String id, String title, long amount, long createdAt, boolean income, String orderId, String kind) {
             this.id = id;
             this.title = title;
             this.amount = amount;
             this.createdAt = createdAt;
             this.income = income;
             this.orderId = orderId;
+            this.kind = kind == null ? "" : kind;
         }
 
         JSONObject toJson() throws JSONException {
             return new JSONObject().put("id", id).put("title", title).put("amount", amount)
-                    .put("createdAt", createdAt).put("income", income).put("orderId", orderId);
+                    .put("createdAt", createdAt).put("income", income).put("orderId", orderId).put("kind", kind);
         }
 
         static Transaction fromJson(JSONObject json) {
             return new Transaction(json.optString("id"), json.optString("title"),
                     json.optLong("amount"), json.optLong("createdAt"), json.optBoolean("income"),
-                    json.optString("orderId"));
+                    json.optString("orderId"), json.optString("kind"));
         }
     }
 }

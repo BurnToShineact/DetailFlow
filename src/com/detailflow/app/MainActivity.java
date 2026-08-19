@@ -8,10 +8,12 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.text.InputType;
@@ -20,6 +22,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -72,6 +75,8 @@ public class MainActivity extends Activity {
     private String photoOrderId;
     private Uri pendingCameraUri;
     private final Map<String, TextView> navLabels = new HashMap<>();
+    private final Map<String, LinearLayout> navItems = new HashMap<>();
+    private final Map<String, ImageView> navIcons = new HashMap<>();
 
     @Override
     protected void onCreate(Bundle state) {
@@ -91,6 +96,20 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets systemBars = insets.getInsets(WindowInsets.Type.systemBars());
+                top = systemBars.top;
+                bottom = systemBars.bottom;
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(0, top, 0, bottom);
+            return insets;
+        });
 
         content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
@@ -101,23 +120,42 @@ public class MainActivity extends Activity {
         navigation.setPadding(dp(4), dp(5), dp(4), dp(5));
         navigation.setBackgroundColor(SURFACE);
         navigation.setElevation(dp(10));
-        addNav("today", "Сегодня");
-        addNav("calendar", "Календарь");
-        addNav("orders", "Заказы");
-        addNav("clients", "Клиенты");
-        addNav("more", "Ещё");
-        root.addView(navigation, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)));
+        addNav("today", "Сегодня", R.drawable.ic_nav_today);
+        addNav("calendar", "Календарь", R.drawable.ic_nav_calendar);
+        addNav("orders", "Заказы", R.drawable.ic_nav_orders);
+        addNav("clients", "Клиенты", R.drawable.ic_nav_clients);
+        addNav("more", "Ещё", R.drawable.ic_nav_more);
+        root.addView(navigation, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)));
         setContentView(root);
     }
 
-    private void addNav(String key, String caption) {
-        TextView item = text(caption, 12, MUTED, Typeface.NORMAL);
-        item.setGravity(Gravity.CENTER);
-        item.setMinHeight(dp(52));
-        item.setContentDescription("Открыть раздел «" + caption + "»");
-        item.setOnClickListener(view -> showRoute(key));
-        navigation.addView(item, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        navLabels.put(key, item);
+    private void addNav(String key, String caption, int iconResource) {
+        LinearLayout navItem = new LinearLayout(this);
+        navItem.setOrientation(LinearLayout.VERTICAL);
+        navItem.setGravity(Gravity.CENTER);
+        navItem.setPadding(dp(4), dp(5), dp(4), dp(4));
+        navItem.setMinimumHeight(dp(56));
+        navItem.setClickable(true);
+        navItem.setFocusable(true);
+        navItem.setContentDescription("Открыть раздел «" + caption + "»");
+        navItem.setOnClickListener(view -> showRoute(key));
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconResource);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        navItem.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
+
+        TextView label = text(caption, 12, MUTED, Typeface.NORMAL);
+        label.setGravity(Gravity.CENTER);
+        label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        labelParams.topMargin = dp(3);
+        navItem.addView(label, labelParams);
+
+        navigation.addView(navItem, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        navItems.put(key, navItem);
+        navLabels.put(key, label);
+        navIcons.put(key, icon);
     }
 
     private void showRoute(String nextRoute) {
@@ -127,7 +165,8 @@ public class MainActivity extends Activity {
             boolean selected = item.getKey().equals(nextRoute);
             item.getValue().setTextColor(selected ? BLUE : MUTED);
             item.getValue().setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
-            item.getValue().setBackground(selected ? rounded(Color.rgb(239, 246, 255), 14, 0, Color.TRANSPARENT) : null);
+            navIcons.get(item.getKey()).setImageTintList(ColorStateList.valueOf(selected ? BLUE : MUTED));
+            navItems.get(item.getKey()).setBackground(selected ? rounded(Color.rgb(239, 246, 255), 16, 0, Color.TRANSPARENT) : null);
         }
         switch (nextRoute) {
             case "calendar": showCalendar(); break;

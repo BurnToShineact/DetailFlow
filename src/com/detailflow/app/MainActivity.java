@@ -71,6 +71,8 @@ public class MainActivity extends Activity {
     private final Locale ru = new Locale("ru", "RU");
     private final NumberFormat moneyFormat = NumberFormat.getIntegerInstance(ru);
     private final SimpleDateFormat dayMonth = new SimpleDateFormat("d MMMM", ru);
+    private final SimpleDateFormat shortDayMonth = new SimpleDateFormat("d MMM", ru);
+    private final SimpleDateFormat monthYear = new SimpleDateFormat("LLLL yyyy", ru);
     private final SimpleDateFormat dateTime = new SimpleDateFormat("d MMM, HH:mm", ru);
     private final SimpleDateFormat time = new SimpleDateFormat("HH:mm", ru);
 
@@ -81,6 +83,9 @@ public class MainActivity extends Activity {
     private String route = "today";
     private String photoOrderId;
     private Uri pendingCameraUri;
+    private final Calendar calendarSelected = Calendar.getInstance();
+    private String calendarMode = "week";
+    private Runnable currentBackAction;
     private final Map<String, TextView> navLabels = new HashMap<>();
     private final Map<String, LinearLayout> navItems = new HashMap<>();
     private final Map<String, ImageView> navIcons = new HashMap<>();
@@ -208,6 +213,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout page(String title, String subtitle, Runnable back) {
+        currentBackAction = back;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
@@ -277,30 +283,202 @@ public class MainActivity extends Activity {
     }
 
     private void showCalendar() {
-        LinearLayout root = page("Календарь", "Расписание на сегодня", null);
+        LinearLayout root = page("Календарь", "Неделя и месяц", null);
         LinearLayout body = bodyOf(scrollBody(root));
 
-        LinearLayout dateCard = card();
-        TextView today = text(capitalize(dayMonth.format(new Date())), 19, BLUE, Typeface.BOLD);
-        dateCard.addView(today);
-        dateCard.addView(text("Свободные интервалы видны между заказами", 13, MUTED, Typeface.NORMAL), topMargin(-1, 5));
-        body.addView(dateCard);
+        LinearLayout switcher = new LinearLayout(this);
+        switcher.setOrientation(LinearLayout.HORIZONTAL);
+        switcher.setPadding(dp(4), dp(4), dp(4), dp(4));
+        switcher.setBackground(rounded(Color.rgb(241, 245, 249), 14, 0, Color.TRANSPARENT));
+        switcher.addView(calendarModeButton("Неделя", calendarMode.equals("week"), () -> {
+            calendarMode = "week";
+            showCalendar();
+        }), new LinearLayout.LayoutParams(0, dp(48), 1));
+        switcher.addView(calendarModeButton("Месяц", calendarMode.equals("month"), () -> {
+            calendarMode = "month";
+            showCalendar();
+        }), new LinearLayout.LayoutParams(0, dp(48), 1));
+        body.addView(switcher);
 
-        List<Models.Order> todayOrders = ordersForDay(System.currentTimeMillis());
-        if (todayOrders.isEmpty()) body.addView(emptyCard("Весь день свободен", "Добавьте заказ на удобное время."), topMargin(-1, 16));
+        LinearLayout period = new LinearLayout(this);
+        period.setOrientation(LinearLayout.HORIZONTAL);
+        period.setGravity(Gravity.CENTER_VERTICAL);
+        Button previous = calendarArrowButton("‹", "Предыдущий период");
+        previous.setOnClickListener(view -> shiftCalendar(-1));
+        period.addView(previous, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView periodTitle = text(calendarPeriodTitle(), 17, INK, Typeface.BOLD);
+        periodTitle.setGravity(Gravity.CENTER);
+        period.addView(periodTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button next = calendarArrowButton("›", "Следующий период");
+        next.setOnClickListener(view -> shiftCalendar(1));
+        period.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        body.addView(period, topMargin(-1, 12));
+
+        if (calendarMode.equals("month")) renderMonthGrid(body);
+        else renderWeekStrip(body);
+
+        renderDaySchedule(body, calendarSelected.getTimeInMillis());
+        setPage(root);
+    }
+
+    private void renderDaySchedule(LinearLayout body, long dayMillis) {
+        body.addView(sectionTitle(capitalize(dayMonth.format(new Date(dayMillis)))), topMargin(-1, 24));
+        List<Models.Order> dayOrders = ordersForDay(dayMillis);
+        if (dayOrders.isEmpty()) body.addView(emptyCard("Весь день свободен", "Добавьте заказ на удобное время."), topMargin(-1, 10));
         int previousHour = 9;
-        for (Models.Order order : todayOrders) {
+        for (Models.Order order : dayOrders) {
             Calendar c = Calendar.getInstance(); c.setTimeInMillis(order.startAt);
             int hour = c.get(Calendar.HOUR_OF_DAY);
             if (hour - previousHour >= 2) body.addView(freeSlot(previousHour + ":00 — " + hour + ":00"), topMargin(-1, 12));
             body.addView(timelineCard(order), topMargin(-1, 12));
-            previousHour = Math.max(hour + 1, previousHour);
+            Calendar deadline = Calendar.getInstance(); deadline.setTimeInMillis(order.deadlineAt);
+            previousHour = Math.max(deadline.get(Calendar.HOUR_OF_DAY), hour + 1);
         }
         if (previousHour < 19) body.addView(freeSlot(previousHour + ":00 — 19:00"), topMargin(-1, 12));
         Button add = primaryButton("+  Добавить запись");
         add.setOnClickListener(view -> showNewOrderDialog());
         body.addView(add, topMargin(-1, 20));
-        setPage(root);
+    }
+
+    private Button calendarModeButton(String caption, boolean selected, Runnable action) {
+        Button button = new Button(this);
+        button.setText(caption);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setTextColor(selected ? BLUE_DARK : MUTED);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setBackground(rounded(selected ? SURFACE : Color.TRANSPARENT, 11, 0, Color.TRANSPARENT));
+        button.setElevation(selected ? dp(1) : 0);
+        button.setStateListAnimator(null);
+        button.setOnClickListener(view -> action.run());
+        button.setContentDescription("Показать календарь: " + caption.toLowerCase(ru));
+        return button;
+    }
+
+    private Button calendarArrowButton(String caption, String description) {
+        Button button = new Button(this);
+        button.setText(caption);
+        button.setTextSize(27);
+        button.setTextColor(BLUE);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(0, 0, 0, dp(3));
+        button.setBackground(rounded(Color.rgb(239, 246, 255), 12, 0, Color.TRANSPARENT));
+        button.setStateListAnimator(null);
+        button.setContentDescription(description);
+        return button;
+    }
+
+    private void shiftCalendar(int direction) {
+        if (calendarMode.equals("month")) {
+            int desiredDay = calendarSelected.get(Calendar.DAY_OF_MONTH);
+            calendarSelected.set(Calendar.DAY_OF_MONTH, 1);
+            calendarSelected.add(Calendar.MONTH, direction);
+            calendarSelected.set(Calendar.DAY_OF_MONTH,
+                    Math.min(desiredDay, calendarSelected.getActualMaximum(Calendar.DAY_OF_MONTH)));
+        } else {
+            calendarSelected.add(Calendar.DAY_OF_MONTH, direction * 7);
+        }
+        showCalendar();
+    }
+
+    private String calendarPeriodTitle() {
+        if (calendarMode.equals("month")) return capitalize(monthYear.format(calendarSelected.getTime()));
+        Calendar start = weekStart(calendarSelected);
+        Calendar end = (Calendar) start.clone();
+        end.add(Calendar.DAY_OF_MONTH, 6);
+        if (start.get(Calendar.MONTH) == end.get(Calendar.MONTH)) {
+            return start.get(Calendar.DAY_OF_MONTH) + "–" + dayMonth.format(end.getTime());
+        }
+        return shortDayMonth.format(start.getTime()) + " — " + shortDayMonth.format(end.getTime());
+    }
+
+    private Calendar weekStart(Calendar source) {
+        Calendar start = (Calendar) source.clone();
+        int mondayOffset = (start.get(Calendar.DAY_OF_WEEK) + 5) % 7;
+        start.add(Calendar.DAY_OF_MONTH, -mondayOffset);
+        start.set(Calendar.HOUR_OF_DAY, 0);
+        start.set(Calendar.MINUTE, 0);
+        start.set(Calendar.SECOND, 0);
+        start.set(Calendar.MILLISECOND, 0);
+        return start;
+    }
+
+    private void renderWeekStrip(LinearLayout body) {
+        String[] weekdays = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
+        LinearLayout week = new LinearLayout(this);
+        week.setOrientation(LinearLayout.HORIZONTAL);
+        week.setBaselineAligned(false);
+        Calendar day = weekStart(calendarSelected);
+        for (int index = 0; index < 7; index++) {
+            if (index > 0) week.addView(new Space(this), new LinearLayout.LayoutParams(dp(4), 1));
+            int orders = ordersForDay(day.getTimeInMillis()).size();
+            TextView cell = calendarDayCell(weekdays[index], day, orders, true);
+            week.addView(cell, new LinearLayout.LayoutParams(0, dp(68), 1));
+            day.add(Calendar.DAY_OF_MONTH, 1);
+        }
+        body.addView(week, topMargin(-1, 10));
+    }
+
+    private void renderMonthGrid(LinearLayout body) {
+        String[] weekdays = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.HORIZONTAL);
+        for (int index = 0; index < weekdays.length; index++) {
+            if (index > 0) labels.addView(new Space(this), new LinearLayout.LayoutParams(dp(4), 1));
+            TextView label = text(weekdays[index], 12, MUTED, Typeface.BOLD);
+            label.setGravity(Gravity.CENTER);
+            labels.addView(label, new LinearLayout.LayoutParams(0, dp(32), 1));
+        }
+        body.addView(labels, topMargin(-1, 7));
+
+        Calendar first = (Calendar) calendarSelected.clone();
+        first.set(Calendar.DAY_OF_MONTH, 1);
+        int startOffset = (first.get(Calendar.DAY_OF_WEEK) + 5) % 7;
+        int daysInMonth = first.getActualMaximum(Calendar.DAY_OF_MONTH);
+        int rows = (int) Math.ceil((startOffset + daysInMonth) / 7.0);
+        int dayNumber = 1;
+        for (int rowIndex = 0; rowIndex < rows; rowIndex++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setBaselineAligned(false);
+            for (int column = 0; column < 7; column++) {
+                if (column > 0) row.addView(new Space(this), new LinearLayout.LayoutParams(dp(4), 1));
+                int position = rowIndex * 7 + column;
+                if (position < startOffset || dayNumber > daysInMonth) {
+                    row.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(58), 1));
+                    continue;
+                }
+                Calendar day = (Calendar) first.clone();
+                day.set(Calendar.DAY_OF_MONTH, dayNumber++);
+                int orders = ordersForDay(day.getTimeInMillis()).size();
+                row.addView(calendarDayCell("", day, orders, false), new LinearLayout.LayoutParams(0, dp(58), 1));
+            }
+            body.addView(row, topMargin(-1, rowIndex == 0 ? 0 : 4));
+        }
+    }
+
+    private TextView calendarDayCell(String weekday, Calendar day, int orderCount, boolean showWeekday) {
+        boolean selected = sameDay(day.getTimeInMillis(), calendarSelected.getTimeInMillis());
+        boolean today = sameDay(day.getTimeInMillis(), System.currentTimeMillis());
+        String value = (showWeekday ? weekday + "\n" : "") + day.get(Calendar.DAY_OF_MONTH)
+                + (orderCount > 0 ? "\n• " + orderCount : "");
+        TextView cell = text(value, showWeekday ? 13 : 14, selected ? Color.WHITE : orderCount > 0 ? BLUE_DARK : INK,
+                selected || orderCount > 0 ? Typeface.BOLD : Typeface.NORMAL);
+        cell.setGravity(Gravity.CENTER);
+        cell.setClickable(true);
+        cell.setFocusable(true);
+        cell.setContentDescription(dayMonth.format(day.getTime()) + (orderCount == 0 ? ", заказов нет" : ", заказов: " + orderCount));
+        int fill = selected ? BLUE : orderCount > 0 ? Color.rgb(239, 246, 255) : Color.TRANSPARENT;
+        cell.setBackground(rounded(fill, 11, today && !selected ? 1 : 0, BLUE));
+        long selectedTime = day.getTimeInMillis();
+        cell.setOnClickListener(view -> {
+            calendarSelected.setTimeInMillis(selectedTime);
+            showCalendar();
+        });
+        addRipple(cell);
+        return cell;
     }
 
     private void showOrders() {
@@ -815,7 +993,8 @@ public class MainActivity extends Activity {
 
     private void showOrderDetail(String orderId) {
         String sourceRoute = route;
-        showOrderDetail(orderId, () -> showRoute(sourceRoute.equals("finance") ? "finance" : sourceRoute.equals("today") ? "today" : "orders"));
+        showOrderDetail(orderId, () -> showRoute(sourceRoute.equals("finance") ? "finance"
+                : sourceRoute.equals("calendar") ? "calendar" : sourceRoute.equals("today") ? "today" : "orders"));
     }
 
     private void showOrderDetail(String orderId, Runnable back) {
@@ -852,6 +1031,10 @@ public class MainActivity extends Activity {
         if (model == null && !modelCaption.isEmpty()) identity.addView(text(modelCaption, 13, MUTED, Typeface.BOLD), topMargin(-1, 4));
         if (!order.plate.isEmpty()) identity.addView(text(order.plate, 13, MUTED, Typeface.BOLD), topMargin(-1, 4));
         identity.addView(statusPill(order.status), topMargin(-1, 10));
+        Button reschedule = compactLinkButton("Перенести дату  ›");
+        reschedule.setContentDescription("Перенести дату заказа");
+        reschedule.setOnClickListener(view -> rescheduleOrder(order, back));
+        identity.addView(reschedule, topMargin(-1, 10));
         body.addView(identity);
 
         LinearLayout noteHeader = sectionHeaderWithAction("Примечание", "+");
@@ -889,9 +1072,9 @@ public class MainActivity extends Activity {
 
         body.addView(sectionTitle("Фото до и после"), topMargin(-1, 22));
         LinearLayout photos = new LinearLayout(this); photos.setOrientation(LinearLayout.HORIZONTAL);
-        photos.addView(photoTile(order, true), new LinearLayout.LayoutParams(0, dp(184), 1));
+        photos.addView(photoTile(order, true, back), new LinearLayout.LayoutParams(0, dp(184), 1));
         photos.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
-        photos.addView(photoTile(order, false), new LinearLayout.LayoutParams(0, dp(184), 1));
+        photos.addView(photoTile(order, false, back), new LinearLayout.LayoutParams(0, dp(184), 1));
         body.addView(photos);
 
         Button status = primaryButton(nextStatusCaption(order.status));
@@ -918,7 +1101,37 @@ public class MainActivity extends Activity {
         showStyledDialog(dialog);
     }
 
-    private View photoTile(Models.Order order, boolean before) {
+    private void rescheduleOrder(Models.Order order, Runnable back) {
+        Calendar selected = Calendar.getInstance();
+        selected.setTimeInMillis(order.startAt);
+        long existingDuration = order.deadlineAt - order.startAt;
+        long durationMillis = existingDuration > 0 ? existingDuration : 60 * 60 * 1000L;
+        LinearLayout form = dialogForm();
+        LinearLayout schedule = dialogSection("Новая дата и время");
+        schedule.addView(text("Сейчас: " + dateTime.format(new Date(order.startAt)), 13, MUTED, Typeface.NORMAL));
+        Button when = outlineButton(dateTime.format(selected.getTime()), BLUE);
+        when.setContentDescription("Выбрать новую дату и время заказа");
+        when.setOnClickListener(view -> chooseDateTime(selected, when, ""));
+        schedule.addView(when, topMargin(-1, 10));
+        schedule.addView(text("Длительность работ сохранится: " + duration((int) (durationMillis / 60000L)),
+                13, MUTED, Typeface.NORMAL), topMargin(-1, 8));
+        form.addView(schedule);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Перенести заказ")
+                .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Перенести", null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            order.startAt = selected.getTimeInMillis();
+            order.deadlineAt = order.startAt + durationMillis;
+            calendarSelected.setTimeInMillis(order.startAt);
+            store.sortOrders();
+            store.save();
+            dialog.dismiss();
+            toast("Дата заказа изменена");
+            showOrderDetail(order.id, back);
+        }));
+        showStyledDialog(dialog);
+    }
+
+    private View photoTile(Models.Order order, boolean before, Runnable back) {
         List<String> uris = before ? order.beforeUris : order.afterUris;
         String uriText = uris.isEmpty() ? "" : uris.get(uris.size() - 1);
         FrameLayout frame = new FrameLayout(this);
@@ -934,14 +1147,92 @@ public class MainActivity extends Activity {
         TextView label = text(uriText.isEmpty() ? "+  " + photoLabel : photoLabel + " • " + uris.size(), 14,
                 uriText.isEmpty() ? BLUE : Color.WHITE, Typeface.BOLD);
         label.setGravity(Gravity.CENTER);
+        label.setPadding(dp(10), 0, dp(10), 0);
         if (!uriText.isEmpty()) label.setBackground(rounded(Color.argb(175, 15, 23, 42), 10, 0, Color.TRANSPARENT));
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(uriText.isEmpty() ? ViewGroup.LayoutParams.MATCH_PARENT : dp(78), dp(44), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(uriText.isEmpty() ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(44), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         lp.setMargins(dp(8), dp(8), dp(8), dp(10));
         frame.addView(label, lp);
-        frame.setOnClickListener(view -> choosePhoto(order.id, before));
+        frame.setContentDescription(uriText.isEmpty() ? "Добавить " + photoLabel.toLowerCase(ru)
+                : "Открыть " + photoLabel.toLowerCase(ru) + ", фотографий: " + uris.size());
+        frame.setOnClickListener(view -> {
+            if (uris.isEmpty()) choosePhoto(order.id, before);
+            else showPhotoGallery(order.id, before, uris.size() - 1, back);
+        });
         frame.setClickable(true);
         addRipple(frame);
         return frame;
+    }
+
+    private void showPhotoGallery(String orderId, boolean before, int requestedIndex, Runnable back) {
+        Models.Order order = store.orderById(orderId);
+        if (order == null) { back.run(); return; }
+        List<String> uris = before ? order.beforeUris : order.afterUris;
+        if (uris.isEmpty()) { showOrderDetail(order.id, back); return; }
+        int index = Math.max(0, Math.min(requestedIndex, uris.size() - 1));
+        navigation.setVisibility(View.GONE);
+        String title = before ? "Фото до" : "Фото после";
+        LinearLayout root = page(title, (index + 1) + " из " + uris.size(), () -> showOrderDetail(order.id, back));
+        LinearLayout body = bodyOf(scrollBody(root));
+
+        FrameLayout preview = new FrameLayout(this);
+        preview.setBackground(rounded(Color.rgb(15, 23, 42), 18, 0, Color.TRANSPARENT));
+        ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setContentDescription(title + ", " + (index + 1) + " из " + uris.size());
+        try { image.setImageURI(Uri.parse(uris.get(index))); } catch (Exception ignored) { }
+        preview.addView(image, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        body.addView(preview, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(420)));
+
+        if (uris.size() > 1) {
+            LinearLayout paging = new LinearLayout(this);
+            paging.setOrientation(LinearLayout.HORIZONTAL);
+            paging.setGravity(Gravity.CENTER_VERTICAL);
+            Button previous = calendarArrowButton("‹", "Предыдущее фото");
+            previous.setEnabled(index > 0);
+            previous.setOnClickListener(view -> showPhotoGallery(order.id, before, index - 1, back));
+            paging.addView(previous, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            TextView counter = text((index + 1) + " / " + uris.size(), 14, MUTED, Typeface.BOLD);
+            counter.setGravity(Gravity.CENTER);
+            paging.addView(counter, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            Button next = calendarArrowButton("›", "Следующее фото");
+            next.setEnabled(index < uris.size() - 1);
+            next.setOnClickListener(view -> showPhotoGallery(order.id, before, index + 1, back));
+            paging.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            body.addView(paging, topMargin(-1, 12));
+        }
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button add = outlineButton("+ Добавить", BLUE);
+        add.setOnClickListener(view -> choosePhoto(order.id, before));
+        actions.addView(add, new LinearLayout.LayoutParams(0, dp(54), 1));
+        actions.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
+        Button delete = outlineButton("Удалить", RED);
+        delete.setContentDescription("Удалить текущее фото из заказа");
+        delete.setOnClickListener(view -> confirmDeletePhoto(order, before, index, back));
+        actions.addView(delete, new LinearLayout.LayoutParams(0, dp(54), 1));
+        body.addView(actions, topMargin(-1, 18));
+        body.addView(text("Удаление уберёт фото из заказа, но оставит оригинал на телефоне.",
+                13, MUTED, Typeface.NORMAL), topMargin(-1, 10));
+        setPage(root);
+    }
+
+    private void confirmDeletePhoto(Models.Order order, boolean before, int index, Runnable back) {
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Удалить фото?")
+                .setMessage("Фото исчезнет из этого заказа. Оригинал в галерее телефона останется.")
+                .setNegativeButton("Отмена", null)
+                .setNeutralButton("Удалить", (ignored, which) -> {
+                    List<String> uris = before ? order.beforeUris : order.afterUris;
+                    if (index < 0 || index >= uris.size()) return;
+                    uris.remove(index);
+                    store.save();
+                    toast("Фото удалено из заказа");
+                    if (uris.isEmpty()) showOrderDetail(order.id, back);
+                    else showPhotoGallery(order.id, before, Math.min(index, uris.size() - 1), back);
+                }).create();
+        showStyledDialog(dialog);
     }
 
     private void showNewOrderDialog() { showNewOrderDialog(null); }
@@ -1244,11 +1535,15 @@ public class MainActivity extends Activity {
     }
 
     private void chooseDateTime(Calendar selected, Button button) {
+        chooseDateTime(selected, button, "Время: ");
+    }
+
+    private void chooseDateTime(Calendar selected, Button button, String prefix) {
         DatePickerDialog dateDialog = new DatePickerDialog(this, (view, year, month, day) -> {
             selected.set(Calendar.YEAR, year); selected.set(Calendar.MONTH, month); selected.set(Calendar.DAY_OF_MONTH, day);
             TimePickerDialog timeDialog = new TimePickerDialog(this, (picker, hour, minute) -> {
                 selected.set(Calendar.HOUR_OF_DAY, hour); selected.set(Calendar.MINUTE, minute); selected.set(Calendar.SECOND, 0);
-                button.setText("Время: " + dateTime.format(selected.getTime()));
+                button.setText(prefix + dateTime.format(selected.getTime()));
             }, selected.get(Calendar.HOUR_OF_DAY), selected.get(Calendar.MINUTE), true);
             timeDialog.show();
         }, selected.get(Calendar.YEAR), selected.get(Calendar.MONTH), selected.get(Calendar.DAY_OF_MONTH));
@@ -1758,7 +2053,12 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (navigation.getVisibility() == View.GONE) showRoute(route);
+        if (currentBackAction != null) {
+            Runnable action = currentBackAction;
+            currentBackAction = null;
+            action.run();
+        }
+        else if (navigation.getVisibility() == View.GONE) showRoute(route);
         else if (!route.equals("today")) showRoute("today");
         else super.onBackPressed();
     }

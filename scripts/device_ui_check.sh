@@ -42,6 +42,14 @@ screen_height = bounds(screen_nodes[0])[3] if screen_nodes else 0
 safe_bottom = screen_height - round(24 * density)
 nav_items = [n for n in root.iter("node") if n.attrib.get("content-desc", "").startswith("Открыть раздел")]
 nav_with_icons = [n for n in nav_items if any(c.attrib.get("class") == "android.widget.ImageView" for c in n.iter("node"))]
+nav_descriptions = {n.attrib.get("content-desc", "") for n in nav_items}
+expected_nav = {
+    "Открыть раздел «Сегодня»",
+    "Открыть раздел «Календарь»",
+    "Открыть раздел «Заказы»",
+    "Открыть раздел «Финансы»",
+    "Открыть раздел «Ещё»",
+}
 nav_bottom = max((bounds(n)[3] for n in nav_items), default=screen_height)
 
 errors = []
@@ -51,6 +59,8 @@ if len(nav_items) != 5:
     errors.append(f"expected 5 navigation items, found {len(nav_items)}")
 if len(nav_with_icons) != 5:
     errors.append(f"navigation icons missing: {len(nav_with_icons)}/5")
+if nav_descriptions != expected_nav:
+    errors.append("unexpected navigation sections: " + ", ".join(sorted(nav_descriptions)))
 if nav_bottom > safe_bottom:
     errors.append(f"navigation overlaps gesture area: bottom={nav_bottom}, expected<={safe_bottom}")
 

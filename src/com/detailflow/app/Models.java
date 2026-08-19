@@ -128,23 +128,26 @@ final class Models {
         long amount;
         long createdAt;
         boolean income;
+        String orderId;
 
-        Transaction(String id, String title, long amount, long createdAt, boolean income) {
+        Transaction(String id, String title, long amount, long createdAt, boolean income, String orderId) {
             this.id = id;
             this.title = title;
             this.amount = amount;
             this.createdAt = createdAt;
             this.income = income;
+            this.orderId = orderId;
         }
 
         JSONObject toJson() throws JSONException {
             return new JSONObject().put("id", id).put("title", title).put("amount", amount)
-                    .put("createdAt", createdAt).put("income", income);
+                    .put("createdAt", createdAt).put("income", income).put("orderId", orderId);
         }
 
         static Transaction fromJson(JSONObject json) {
             return new Transaction(json.optString("id"), json.optString("title"),
-                    json.optLong("amount"), json.optLong("createdAt"), json.optBoolean("income"));
+                    json.optLong("amount"), json.optLong("createdAt"), json.optBoolean("income"),
+                    json.optString("orderId"));
         }
     }
 }

@@ -29,8 +29,10 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ArrayAdapter;
 import android.widget.ScrollView;
 import android.widget.Space;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -123,7 +125,7 @@ public class MainActivity extends Activity {
         addNav("today", "Сегодня", R.drawable.ic_nav_today);
         addNav("calendar", "Календарь", R.drawable.ic_nav_calendar);
         addNav("orders", "Заказы", R.drawable.ic_nav_orders);
-        addNav("clients", "Клиенты", R.drawable.ic_nav_clients);
+        addNav("finance", "Финансы", R.drawable.ic_nav_finance);
         addNav("more", "Ещё", R.drawable.ic_nav_more);
         root.addView(navigation, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)));
         setContentView(root);
@@ -145,7 +147,7 @@ public class MainActivity extends Activity {
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         navItem.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
-        TextView label = text(caption, 12, MUTED, Typeface.NORMAL);
+        TextView label = text(caption, 11, MUTED, Typeface.NORMAL);
         label.setGravity(Gravity.CENTER);
         label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -171,7 +173,7 @@ public class MainActivity extends Activity {
         switch (nextRoute) {
             case "calendar": showCalendar(); break;
             case "orders": showOrders(); break;
-            case "clients": showClients(); break;
+            case "finance": showFinance(); break;
             case "more": showMore(); break;
             default: showToday();
         }
@@ -292,7 +294,8 @@ public class MainActivity extends Activity {
     }
 
     private void showClients() {
-        LinearLayout root = page("Клиенты", "Контакты и история", null);
+        navigation.setVisibility(View.GONE);
+        LinearLayout root = page("Клиенты", "Контакты и история", () -> showRoute("more"));
         LinearLayout body = bodyOf(scrollBody(root));
         if (store.clients.isEmpty()) body.addView(emptyCard("Клиентов пока нет", "Клиент добавится вместе с первым заказом."));
         for (Models.Client client : store.clients) {
@@ -315,8 +318,8 @@ public class MainActivity extends Activity {
     private void showMore() {
         LinearLayout root = page("Ещё", "Настройки бизнеса", null);
         LinearLayout body = bodyOf(scrollBody(root));
-        body.addView(actionCard("Услуги", "Названия, цены и длительность", () -> showServices()));
-        body.addView(actionCard("Финансы", "Выручка, расходы и прибыль", () -> showFinance()), topMargin(-1, 12));
+        body.addView(actionCard("Клиенты", "Контакты и история заказов", () -> showClients()));
+        body.addView(actionCard("Услуги", "Названия, цены и длительность", () -> showServices()), topMargin(-1, 12));
         body.addView(actionCard("Обновления", "Проверка новых версий через GitHub", () -> showUpdates()), topMargin(-1, 12));
         body.addView(actionCard("О приложении", "DetailFlow " + updateManager.currentVersion() + " • данные хранятся на телефоне", () ->
                 message("DetailFlow", "Автономное приложение для управления детейлингом. Интернет и регистрация не требуются.")), topMargin(-1, 12));
@@ -405,8 +408,7 @@ public class MainActivity extends Activity {
     }
 
     private void showFinance() {
-        navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Финансы", "Текущий месяц", () -> showRoute("more"));
+        LinearLayout root = page("Финансы", "Текущий месяц", null);
         LinearLayout body = bodyOf(scrollBody(root));
         long revenue = monthRevenue();
         long expenses = 0;
@@ -432,6 +434,7 @@ public class MainActivity extends Activity {
         body.addView(sectionTitle("Последние операции"), topMargin(-1, 24));
         List<Models.Transaction> txs = new ArrayList<>(store.transactions);
         txs.sort((a, b) -> Long.compare(b.createdAt, a.createdAt));
+        if (txs.isEmpty()) body.addView(emptyCard("Операций пока нет", "Добавьте первый доход или расход."), topMargin(-1, 10));
         for (Models.Transaction transaction : txs) body.addView(transactionCard(transaction), topMargin(-1, 10));
 
         LinearLayout buttons = new LinearLayout(this); buttons.setOrientation(LinearLayout.HORIZONTAL);
@@ -448,7 +451,7 @@ public class MainActivity extends Activity {
         Models.Client client = store.clientById(clientId);
         if (client == null) return;
         navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Клиент", client.name, () -> showRoute("clients"));
+        LinearLayout root = page("Клиент", client.name, () -> showClients());
         LinearLayout body = bodyOf(scrollBody(root));
         LinearLayout profile = card();
         profile.addView(text(client.name, 22, INK, Typeface.BOLD));
@@ -494,6 +497,20 @@ public class MainActivity extends Activity {
             if (service != null) body.addView(infoRow(service.name, duration(service.durationMinutes), BLUE), topMargin(-1, 8));
         }
         body.addView(infoRow("Итого", money(order.total), INK), topMargin(-1, 10));
+
+        body.addView(sectionTitle("Расходы по заказу"), topMargin(-1, 22));
+        long linkedExpenses = 0;
+        for (Models.Transaction transaction : store.transactions) {
+            if (!transaction.income && order.id.equals(transaction.orderId)) {
+                linkedExpenses += transaction.amount;
+                body.addView(transactionCard(transaction), topMargin(-1, 8));
+            }
+        }
+        if (linkedExpenses == 0) body.addView(text("Расходов пока нет", 14, MUTED, Typeface.NORMAL), topMargin(-1, 8));
+        else body.addView(infoRow("Всего расходов", money(linkedExpenses), RED), topMargin(-1, 8));
+        Button addExpense = outlineButton("+ Добавить расход", AMBER);
+        addExpense.setOnClickListener(view -> addTransaction(false, order));
+        body.addView(addExpense, topMargin(-1, 10));
 
         body.addView(sectionTitle("Фото до и после"), topMargin(-1, 22));
         LinearLayout photos = new LinearLayout(this); photos.setOrientation(LinearLayout.HORIZONTAL);
@@ -642,19 +659,54 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
-    private void addTransaction(boolean income) {
+    private void addTransaction(boolean income) { addTransaction(income, null); }
+
+    private void addTransaction(boolean income, Models.Order presetOrder) {
         LinearLayout form = dialogForm();
-        EditText title = field(income ? "Источник дохода" : "Категория расхода", InputType.TYPE_CLASS_TEXT);
+        EditText title = field(income ? "Источник дохода" : "На что потрачено", InputType.TYPE_CLASS_TEXT);
         EditText amount = field("Сумма, ₽", InputType.TYPE_CLASS_NUMBER);
         form.addView(labeled(title)); form.addView(labeled(amount), topMargin(-1, 8));
+
+        List<String> orderIds = new ArrayList<>();
+        Spinner orderSpinner = null;
+        if (!income) {
+            TextView orderLabel = text("Связать с заказом", 13, MUTED, Typeface.BOLD);
+            form.addView(orderLabel, topMargin(-1, 10));
+            orderSpinner = new Spinner(this);
+            orderSpinner.setId(View.generateViewId());
+            orderSpinner.setContentDescription("Заказ для расхода");
+            orderSpinner.setMinimumHeight(dp(56));
+            orderSpinner.setPadding(dp(10), 0, dp(10), 0);
+            orderSpinner.setBackground(rounded(SURFACE, 12, 1, BORDER));
+            List<String> orderNames = new ArrayList<>();
+            orderNames.add("Без заказа");
+            orderIds.add("");
+            List<Models.Order> orders = new ArrayList<>(store.orders);
+            orders.sort((a, b) -> Long.compare(b.startAt, a.startAt));
+            int selectedIndex = 0;
+            for (Models.Order order : orders) {
+                orderNames.add("Заказ #" + order.id + " • " + order.car);
+                orderIds.add(order.id);
+                if (presetOrder != null && presetOrder.id.equals(order.id)) selectedIndex = orderIds.size() - 1;
+            }
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, orderNames);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            orderSpinner.setAdapter(adapter);
+            orderSpinner.setSelection(selectedIndex);
+            orderLabel.setLabelFor(orderSpinner.getId());
+            form.addView(orderSpinner, topMargin(-1, 5));
+        }
+        Spinner finalOrderSpinner = orderSpinner;
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(income ? "Добавить доход" : "Добавить расход")
                 .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String titleText = title.getText().toString().trim(); long amountValue = parseLong(amount.getText().toString());
             if (titleText.isEmpty()) { title.setError("Укажите название"); return; }
             if (amountValue <= 0) { amount.setError("Укажите сумму"); return; }
-            store.transactions.add(new Models.Transaction(store.newId(), titleText, amountValue, System.currentTimeMillis(), income));
-            store.save(); dialog.dismiss(); showFinance();
+            String orderId = income || finalOrderSpinner == null ? "" : orderIds.get(finalOrderSpinner.getSelectedItemPosition());
+            store.transactions.add(new Models.Transaction(store.newId(), titleText, amountValue, System.currentTimeMillis(), income, orderId));
+            store.save(); dialog.dismiss();
+            if (presetOrder == null) showFinance(); else showOrderDetail(presetOrder.id);
         }));
         dialog.show();
     }
@@ -787,7 +839,21 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout transactionCard(Models.Transaction transaction) {
-        return infoRow(transaction.title, (transaction.income ? "+" : "−") + money(transaction.amount), transaction.income ? GREEN : RED);
+        LinearLayout item = card();
+        LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text(transaction.title, 15, INK, Typeface.BOLD), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(text((transaction.income ? "+" : "−") + money(transaction.amount), 15,
+                transaction.income ? GREEN : RED, Typeface.BOLD));
+        item.addView(row);
+        String detail = dateTime.format(new Date(transaction.createdAt));
+        if (!transaction.orderId.isEmpty()) {
+            Models.Order order = store.orderById(transaction.orderId);
+            detail += order == null ? " • Заказ #" + transaction.orderId : " • Заказ #" + order.id + " • " + order.car;
+        } else if (!transaction.income) {
+            detail += " • Без заказа";
+        }
+        item.addView(text(detail, 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        return item;
     }
 
     private LinearLayout actionCard(String title, String subtitle, Runnable action) {

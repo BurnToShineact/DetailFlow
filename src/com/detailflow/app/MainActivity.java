@@ -342,7 +342,7 @@ public class MainActivity extends Activity {
         body.addView(sectionTitle("Ближайшие записи"), topMargin(-1, 26));
         List<Models.Order> upcoming = upcomingOrders();
         if (upcoming.isEmpty()) body.addView(emptyCard("Записей пока нет", "Создайте первую запись — она появится здесь."));
-        for (int i = 0; i < Math.min(4, upcoming.size()); i++) body.addView(todayOrderCard(upcoming.get(i)), topMargin(-1, 10));
+        for (int i = 0; i < Math.min(4, upcoming.size()); i++) body.addView(orderCard(upcoming.get(i)), topMargin(-1, 10));
 
         Button add = primaryButton("+  Новая запись");
         add.setOnClickListener(view -> showNewOrderDialog());
@@ -2324,41 +2324,6 @@ public class MainActivity extends Activity {
         detail.setEllipsize(TextUtils.TruncateAt.END);
         card.addView(detail, topMargin(-1, 5));
         return card;
-    }
-
-    private LinearLayout todayOrderCard(Models.Order order) {
-        int accent = order.status.equals("Запланировано") ? AMBER : BLUE;
-        LinearLayout item = card();
-        item.setPadding(dp(14), dp(14), dp(14), dp(13));
-        item.setBackground(rounded(SURFACE, 12, 1, withAlpha(accent, 90)));
-        item.setClickable(true); item.setFocusable(true);
-        item.setContentDescription("Открыть заказ " + order.id);
-        item.setOnClickListener(view -> showOrderDetail(order.id));
-        addRipple(item);
-
-        LinearLayout heading = new LinearLayout(this);
-        heading.setOrientation(LinearLayout.HORIZONTAL);
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView timeView = text(time.format(new Date(order.startAt)), 19, accent, Typeface.BOLD);
-        heading.addView(timeView, new LinearLayout.LayoutParams(dp(70), ViewGroup.LayoutParams.WRAP_CONTENT));
-        TextView dot = text("•", 20, accent, Typeface.BOLD); dot.setGravity(Gravity.CENTER);
-        heading.addView(dot, new LinearLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.WRAP_CONTENT));
-        String vehicle = vehicle(order.car, order.carModel, "");
-        heading.addView(text(vehicle.isEmpty() ? "Автомобиль" : vehicle, 17, INK, Typeface.BOLD),
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        heading.addView(text("›", 26, INK, Typeface.NORMAL));
-        item.addView(heading);
-
-        TextView services = text(serviceNames(order), 14, MUTED, Typeface.NORMAL);
-        LinearLayout.LayoutParams servicesParams = topMargin(-1, 5);
-        servicesParams.leftMargin = dp(94);
-        item.addView(services, servicesParams);
-        TextView status = statusPill(order.status);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        statusParams.topMargin = dp(8);
-        statusParams.leftMargin = dp(94);
-        item.addView(status, statusParams);
-        return item;
     }
 
     private LinearLayout orderHistoryCard(Models.Order order) {

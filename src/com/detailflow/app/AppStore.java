@@ -54,6 +54,7 @@ final class AppStore {
             save();
         }
         linkCarModels();
+        migrateOrderServicePrices();
         sortOrders();
         save();
     }
@@ -249,10 +250,42 @@ final class AppStore {
         }
     }
 
+    private void migrateOrderServicePrices() {
+        for (Models.Order order : orders) {
+            if (order.serviceIds.isEmpty() || order.servicePrices.size() >= order.serviceIds.size()) continue;
+            long assigned = 0;
+            long legacySum = 0;
+            List<String> missing = new ArrayList<>();
+            for (String serviceId : order.serviceIds) {
+                if (order.servicePrices.containsKey(serviceId)) assigned += order.servicePrice(serviceId);
+                else {
+                    missing.add(serviceId);
+                    Models.Service service = serviceById(serviceId);
+                    if (service != null) legacySum += Math.max(0, service.legacyPrice);
+                }
+            }
+            long remaining = Math.max(0, order.total - assigned);
+            for (int index = 0; index < missing.size(); index++) {
+                String serviceId = missing.get(index);
+                long price;
+                if (index == missing.size() - 1) price = remaining;
+                else {
+                    Models.Service service = serviceById(serviceId);
+                    long weight = service == null ? 0 : Math.max(0, service.legacyPrice);
+                    price = legacySum > 0 ? Math.round((double) remaining * weight / legacySum)
+                            : remaining / Math.max(1, missing.size());
+                    remaining -= price;
+                    legacySum -= weight;
+                }
+                order.servicePrices.put(serviceId, Math.max(0, price));
+            }
+        }
+    }
+
     private void seed() {
-        Models.Service polish = new Models.Service(newId(), "Полировка кузова", "Кузов", 18000, 360);
-        Models.Service ceramic = new Models.Service(newId(), "Керамика", "Кузов", 25000, 240);
-        Models.Service interior = new Models.Service(newId(), "Химчистка салона", "Салон", 15000, 300);
+        Models.Service polish = new Models.Service(newId(), "Полировка кузова", "Кузов", 360);
+        Models.Service ceramic = new Models.Service(newId(), "Керамика", "Кузов", 240);
+        Models.Service interior = new Models.Service(newId(), "Химчистка салона", "Салон", 300);
         services.add(polish); services.add(ceramic); services.add(interior);
 
         addDefaultCarMakes();

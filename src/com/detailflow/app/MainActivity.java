@@ -98,7 +98,7 @@ public class MainActivity extends Activity {
     private String photoOrderId;
     private Uri pendingCameraUri;
     private final Calendar calendarSelected = Calendar.getInstance();
-    private String calendarMode = "week";
+    private String calendarMode = "day";
     private Runnable currentBackAction;
     private final Map<String, TextView> navLabels = new HashMap<>();
     private final Map<String, LinearLayout> navItems = new HashMap<>();
@@ -119,6 +119,28 @@ public class MainActivity extends Activity {
             this.transaction = null;
             this.paidOrder = paidOrder;
             this.createdAt = paidOrder.startAt;
+        }
+    }
+
+    private static final class NewOrderDraft {
+        Models.Client selectedClient;
+        String clientName = "";
+        String phone = "";
+        String car = "";
+        String carModel = "";
+        String plate = "";
+        String note = "";
+        boolean creatingClient;
+        final List<String> serviceIds = new ArrayList<>();
+        final Map<String, Long> servicePrices = new HashMap<>();
+        final Calendar start = Calendar.getInstance();
+        Runnable cancel;
+
+        NewOrderDraft() {
+            start.add(Calendar.HOUR_OF_DAY, 1);
+            start.set(Calendar.MINUTE, 0);
+            start.set(Calendar.SECOND, 0);
+            start.set(Calendar.MILLISECOND, 0);
         }
     }
 
@@ -161,15 +183,15 @@ public class MainActivity extends Activity {
         navigation = new LinearLayout(this);
         navigation.setOrientation(LinearLayout.HORIZONTAL);
         navigation.setGravity(Gravity.CENTER);
-        navigation.setPadding(dp(4), dp(5), dp(4), dp(5));
+        navigation.setPadding(dp(4), dp(4), dp(4), dp(4));
         navigation.setBackgroundColor(SURFACE);
-        navigation.setElevation(dp(10));
+        navigation.setElevation(dp(6));
         addNav("today", "Сегодня", R.drawable.ic_nav_today);
         addNav("calendar", "Календарь", R.drawable.ic_nav_calendar);
         addNav("orders", "Заказы", R.drawable.ic_nav_orders);
         addNav("finance", "Финансы", R.drawable.ic_nav_finance);
         addNav("more", "Ещё", R.drawable.ic_nav_more);
-        root.addView(navigation, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)));
+        root.addView(navigation, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)));
         setContentView(root);
     }
 
@@ -204,14 +226,7 @@ public class MainActivity extends Activity {
 
     private void showRoute(String nextRoute) {
         route = nextRoute;
-        navigation.setVisibility(View.VISIBLE);
-        for (Map.Entry<String, TextView> item : navLabels.entrySet()) {
-            boolean selected = item.getKey().equals(nextRoute);
-            item.getValue().setTextColor(selected ? BLUE : MUTED);
-            item.getValue().setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
-            navIcons.get(item.getKey()).setImageTintList(ColorStateList.valueOf(selected ? BLUE : MUTED));
-            navItems.get(item.getKey()).setBackground(selected ? rounded(Color.rgb(239, 246, 255), 16, 0, Color.TRANSPARENT) : null);
-        }
+        showNavigationSelection(nextRoute);
         switch (nextRoute) {
             case "calendar": showCalendar(); break;
             case "orders": showOrders(); break;
@@ -221,38 +236,77 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showNavigationSelection(String selectedRoute) {
+        navigation.setVisibility(View.VISIBLE);
+        for (Map.Entry<String, TextView> item : navLabels.entrySet()) {
+            boolean selected = item.getKey().equals(selectedRoute);
+            item.getValue().setTextColor(selected ? BLUE : MUTED);
+            item.getValue().setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
+            navIcons.get(item.getKey()).setImageTintList(ColorStateList.valueOf(selected ? BLUE : MUTED));
+            navItems.get(item.getKey()).setBackground(null);
+        }
+    }
+
     private void setPage(View page) {
         content.removeAllViews();
         content.addView(page, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private LinearLayout page(String title, String subtitle, Runnable back) {
+        return page(title, subtitle, back, null);
+    }
+
+    private LinearLayout page(String title, String subtitle, Runnable back, Runnable headerAction) {
         currentBackAction = back;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BACKGROUND);
 
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(20), dp(14), dp(20), dp(10));
+        FrameLayout bar = new FrameLayout(this);
+        bar.setPadding(dp(20), dp(8), dp(20), dp(6));
+        int barHeight = subtitle != null && !subtitle.isEmpty() ? 76 : 64;
         if (back != null) {
-            TextView backView = text("‹", 38, INK, Typeface.NORMAL);
+            TextView backView = text("‹", 36, INK, Typeface.NORMAL);
             backView.setGravity(Gravity.CENTER);
             backView.setContentDescription("Назад");
             backView.setOnClickListener(view -> back.run());
-            bar.addView(backView, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            FrameLayout.LayoutParams backParams = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START | Gravity.TOP);
+            bar.addView(backView, backParams);
         }
         LinearLayout titleBlock = new LinearLayout(this);
         titleBlock.setOrientation(LinearLayout.VERTICAL);
-        TextView titleView = text(title, 27, INK, Typeface.BOLD);
+        titleBlock.setGravity(back == null ? Gravity.START : Gravity.CENTER_HORIZONTAL);
+        TextView titleView = text(title, back == null ? 27 : 22, INK, Typeface.BOLD);
+        titleView.setGravity(back == null ? Gravity.START : Gravity.CENTER);
         titleBlock.addView(titleView);
         if (subtitle != null && !subtitle.isEmpty()) {
             TextView subtitleView = text(subtitle, 14, MUTED, Typeface.NORMAL);
+            subtitleView.setGravity(back == null ? Gravity.START : Gravity.CENTER);
             titleBlock.addView(subtitleView, topMargin(-1, -2));
         }
-        bar.addView(titleBlock, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        root.addView(bar);
+        FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(
+                back == null ? ViewGroup.LayoutParams.WRAP_CONTENT : dp(260), ViewGroup.LayoutParams.WRAP_CONTENT,
+                back == null ? Gravity.START | Gravity.CENTER_VERTICAL : Gravity.CENTER);
+        if (back == null) titleParams.leftMargin = dp(0);
+        bar.addView(titleBlock, titleParams);
+
+        int actionIcon = title.equals("Сегодня") ? R.drawable.ic_bell
+                : title.equals("Календарь") ? R.drawable.ic_tune
+                : back != null && (title.startsWith("Заказ #") || title.equals("Клиент") || title.equals("Карточка модели"))
+                ? R.drawable.ic_nav_more : 0;
+        if (actionIcon != 0) {
+            ImageView action = iconView(actionIcon, title.equals("Календарь") ? "Настройки календаря" : "Дополнительные действия", INK);
+            FrameLayout.LayoutParams actionParams = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.END | Gravity.TOP);
+            action.setPadding(dp(12), dp(12), dp(12), dp(12));
+            if (headerAction != null) {
+                action.setClickable(true);
+                action.setFocusable(true);
+                action.setOnClickListener(view -> headerAction.run());
+                addRipple(action);
+            }
+            bar.addView(action, actionParams);
+        }
+        root.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(barHeight)));
         return root;
     }
 
@@ -262,7 +316,7 @@ public class MainActivity extends Activity {
         scroll.setClipToPadding(false);
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(20), dp(8), dp(20), dp(28));
+        body.setPadding(dp(20), dp(6), dp(20), dp(24));
         scroll.addView(body, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         return scroll;
@@ -280,15 +334,15 @@ public class MainActivity extends Activity {
         int monthOrders = monthOrders();
         LinearLayout stats = new LinearLayout(this);
         stats.setOrientation(LinearLayout.HORIZONTAL);
-        stats.addView(metricCard("Выручка за месяц", money(monthRevenue), GREEN), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Space gap = new Space(this); stats.addView(gap, new LinearLayout.LayoutParams(dp(12), 1));
+        stats.addView(metricCard("Выручка", money(monthRevenue), GREEN), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Space gap = new Space(this); stats.addView(gap, new LinearLayout.LayoutParams(dp(10), 1));
         stats.addView(metricCard("Заказов", String.valueOf(monthOrders), BLUE), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         body.addView(stats);
 
         body.addView(sectionTitle("Ближайшие записи"), topMargin(-1, 26));
         List<Models.Order> upcoming = upcomingOrders();
         if (upcoming.isEmpty()) body.addView(emptyCard("Записей пока нет", "Создайте первую запись — она появится здесь."));
-        for (int i = 0; i < Math.min(4, upcoming.size()); i++) body.addView(orderCard(upcoming.get(i)), topMargin(-1, 12));
+        for (int i = 0; i < Math.min(4, upcoming.size()); i++) body.addView(todayOrderCard(upcoming.get(i)), topMargin(-1, 10));
 
         Button add = primaryButton("+  Новая запись");
         add.setOnClickListener(view -> showNewOrderDialog());
@@ -297,61 +351,142 @@ public class MainActivity extends Activity {
     }
 
     private void showCalendar() {
-        LinearLayout root = page("Календарь", "Неделя и месяц", null);
+        LinearLayout root = page("Календарь", "", null);
         LinearLayout body = bodyOf(scrollBody(root));
 
         LinearLayout switcher = new LinearLayout(this);
         switcher.setOrientation(LinearLayout.HORIZONTAL);
         switcher.setPadding(dp(4), dp(4), dp(4), dp(4));
         switcher.setBackground(rounded(Color.rgb(241, 245, 249), 14, 0, Color.TRANSPARENT));
+        switcher.addView(calendarModeButton("День", calendarMode.equals("day"), () -> {
+            calendarMode = "day";
+            showCalendar();
+        }), new LinearLayout.LayoutParams(0, dp(44), 1));
         switcher.addView(calendarModeButton("Неделя", calendarMode.equals("week"), () -> {
             calendarMode = "week";
             showCalendar();
-        }), new LinearLayout.LayoutParams(0, dp(48), 1));
+        }), new LinearLayout.LayoutParams(0, dp(44), 1));
         switcher.addView(calendarModeButton("Месяц", calendarMode.equals("month"), () -> {
             calendarMode = "month";
             showCalendar();
-        }), new LinearLayout.LayoutParams(0, dp(48), 1));
+        }), new LinearLayout.LayoutParams(0, dp(44), 1));
         body.addView(switcher);
 
+        if (calendarMode.equals("month")) {
+            body.addView(calendarPeriodBar(), topMargin(-1, 10));
+            renderMonthGrid(body);
+            renderDaySchedule(body, calendarSelected.getTimeInMillis());
+        } else {
+            renderWeekStrip(body);
+            if (calendarMode.equals("week")) body.addView(calendarPeriodBar(), topMargin(-1, 5));
+            renderDaySchedule(body, calendarSelected.getTimeInMillis());
+        }
+        setPage(root);
+    }
+
+    private void renderDaySchedule(LinearLayout body, long dayMillis) {
+        final int firstHour = 9;
+        final int lastHour = 19;
+        final int hourHeight = 48;
+        FrameLayout timeline = new FrameLayout(this);
+        timeline.setClipChildren(false);
+        timeline.setClipToPadding(false);
+        timeline.setPadding(0, dp(4), 0, dp(18));
+        int timelineHeight = dp((lastHour - firstHour) * hourHeight + 28);
+
+        for (int hour = firstHour; hour <= lastHour; hour++) {
+            TextView hourLabel = text(String.format(ru, "%02d:00", hour), 11, MUTED, Typeface.NORMAL);
+            hourLabel.setGravity(Gravity.TOP | Gravity.START);
+            FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(dp(46), dp(24));
+            labelParams.topMargin = dp(4 + (hour - firstHour) * hourHeight - 7);
+            timeline.addView(hourLabel, labelParams);
+
+            View divider = new View(this);
+            divider.setBackgroundColor(BORDER);
+            FrameLayout.LayoutParams dividerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+            dividerParams.leftMargin = dp(52);
+            dividerParams.topMargin = dp(4 + (hour - firstHour) * hourHeight);
+            timeline.addView(divider, dividerParams);
+        }
+
+        List<Models.Order> dayOrders = ordersForDay(dayMillis);
+        for (Models.Order order : dayOrders) {
+            Calendar start = Calendar.getInstance();
+            start.setTimeInMillis(order.startAt);
+            float offsetHours = start.get(Calendar.HOUR_OF_DAY) + start.get(Calendar.MINUTE) / 60f - firstHour;
+            if (offsetHours < 0 || offsetHours > lastHour - firstHour) continue;
+            int durationMinutes = (int) Math.max(60, (order.deadlineAt - order.startAt) / 60000L);
+            int blockHeight = Math.max(dp(58), dp(hourHeight * durationMinutes / 60f - 4));
+            LinearLayout block = calendarEventBlock(order);
+            FrameLayout.LayoutParams eventParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, blockHeight);
+            eventParams.leftMargin = dp(58);
+            eventParams.rightMargin = dp(4);
+            eventParams.topMargin = dp(7 + offsetHours * hourHeight);
+            timeline.addView(block, eventParams);
+        }
+
+        if (dayOrders.isEmpty()) {
+            TextView free = text("Свободное время", 13, MUTED, Typeface.BOLD);
+            free.setGravity(Gravity.CENTER);
+            free.setBackground(dashedRounded(Color.TRANSPARENT, 9, BORDER));
+            free.setOnClickListener(view -> showNewOrderDialog());
+            free.setClickable(true);
+            FrameLayout.LayoutParams freeParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64));
+            freeParams.leftMargin = dp(58);
+            freeParams.rightMargin = dp(4);
+            freeParams.topMargin = dp(7 + 7 * hourHeight);
+            timeline.addView(free, freeParams);
+        }
+
+        Button add = new Button(this);
+        add.setText("+");
+        add.setTextSize(27);
+        add.setTextColor(Color.WHITE);
+        add.setGravity(Gravity.CENTER);
+        add.setPadding(0, 0, 0, dp(3));
+        add.setBackground(circleDrawable(BLUE));
+        add.setStateListAnimator(null);
+        add.setContentDescription("Добавить запись");
+        add.setOnClickListener(view -> showNewOrderDialog());
+        FrameLayout.LayoutParams addParams = new FrameLayout.LayoutParams(dp(54), dp(54), Gravity.END | Gravity.BOTTOM);
+        addParams.rightMargin = dp(4);
+        timeline.addView(add, addParams);
+        body.addView(timeline, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, timelineHeight));
+    }
+
+    private LinearLayout calendarPeriodBar() {
         LinearLayout period = new LinearLayout(this);
         period.setOrientation(LinearLayout.HORIZONTAL);
         period.setGravity(Gravity.CENTER_VERTICAL);
         Button previous = calendarArrowButton("‹", "Предыдущий период");
         previous.setOnClickListener(view -> shiftCalendar(-1));
-        period.addView(previous, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView periodTitle = text(calendarPeriodTitle(), 17, INK, Typeface.BOLD);
+        period.addView(previous, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        TextView periodTitle = text(calendarPeriodTitle(), 15, INK, Typeface.BOLD);
         periodTitle.setGravity(Gravity.CENTER);
         period.addView(periodTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         Button next = calendarArrowButton("›", "Следующий период");
         next.setOnClickListener(view -> shiftCalendar(1));
-        period.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        body.addView(period, topMargin(-1, 12));
-
-        if (calendarMode.equals("month")) renderMonthGrid(body);
-        else renderWeekStrip(body);
-
-        renderDaySchedule(body, calendarSelected.getTimeInMillis());
-        setPage(root);
+        period.addView(next, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        return period;
     }
 
-    private void renderDaySchedule(LinearLayout body, long dayMillis) {
-        body.addView(sectionTitle(capitalize(dayMonth.format(new Date(dayMillis)))), topMargin(-1, 24));
-        List<Models.Order> dayOrders = ordersForDay(dayMillis);
-        if (dayOrders.isEmpty()) body.addView(emptyCard("Весь день свободен", "Добавьте заказ на удобное время."), topMargin(-1, 10));
-        int previousHour = 9;
-        for (Models.Order order : dayOrders) {
-            Calendar c = Calendar.getInstance(); c.setTimeInMillis(order.startAt);
-            int hour = c.get(Calendar.HOUR_OF_DAY);
-            if (hour - previousHour >= 2) body.addView(freeSlot(previousHour + ":00 — " + hour + ":00"), topMargin(-1, 12));
-            body.addView(timelineCard(order), topMargin(-1, 12));
-            Calendar deadline = Calendar.getInstance(); deadline.setTimeInMillis(order.deadlineAt);
-            previousHour = Math.max(deadline.get(Calendar.HOUR_OF_DAY), hour + 1);
-        }
-        if (previousHour < 19) body.addView(freeSlot(previousHour + ":00 — 19:00"), topMargin(-1, 12));
-        Button add = primaryButton("+  Добавить запись");
-        add.setOnClickListener(view -> showNewOrderDialog());
-        body.addView(add, topMargin(-1, 20));
+    private LinearLayout calendarEventBlock(Models.Order order) {
+        int color = order.status.equals("Завершено") ? GREEN : BLUE;
+        int fill = order.status.equals("Завершено") ? Color.rgb(236, 253, 245) : Color.rgb(239, 246, 255);
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(dp(11), dp(8), dp(10), dp(7));
+        block.setBackground(rounded(fill, 9, 1, withAlpha(color, 110)));
+        block.setClickable(true);
+        block.setOnClickListener(view -> showOrderDetail(order.id));
+        addRipple(block);
+        String interval = time.format(new Date(order.startAt)) + "–" + time.format(new Date(order.deadlineAt));
+        block.addView(text(interval + "   " + vehicle(order.car, order.carModel, order.plate), 12, color, Typeface.BOLD));
+        TextView services = text(serviceNames(order), 13, INK, Typeface.BOLD);
+        services.setSingleLine(true);
+        services.setEllipsize(TextUtils.TruncateAt.END);
+        block.addView(services, topMargin(-1, 3));
+        return block;
     }
 
     private Button calendarModeButton(String caption, boolean selected, Runnable action) {
@@ -391,14 +526,17 @@ public class MainActivity extends Activity {
             calendarSelected.add(Calendar.MONTH, direction);
             calendarSelected.set(Calendar.DAY_OF_MONTH,
                     Math.min(desiredDay, calendarSelected.getActualMaximum(Calendar.DAY_OF_MONTH)));
-        } else {
+        } else if (calendarMode.equals("week")) {
             calendarSelected.add(Calendar.DAY_OF_MONTH, direction * 7);
+        } else {
+            calendarSelected.add(Calendar.DAY_OF_MONTH, direction);
         }
         showCalendar();
     }
 
     private String calendarPeriodTitle() {
         if (calendarMode.equals("month")) return capitalize(monthYear.format(calendarSelected.getTime()));
+        if (calendarMode.equals("day")) return capitalize(dayMonth.format(calendarSelected.getTime()));
         Calendar start = weekStart(calendarSelected);
         Calendar end = (Calendar) start.clone();
         end.add(Calendar.DAY_OF_MONTH, 6);
@@ -426,13 +564,32 @@ public class MainActivity extends Activity {
         week.setBaselineAligned(false);
         Calendar day = weekStart(calendarSelected);
         for (int index = 0; index < 7; index++) {
-            if (index > 0) week.addView(new Space(this), new LinearLayout.LayoutParams(dp(4), 1));
-            int orders = ordersForDay(day.getTimeInMillis()).size();
-            TextView cell = calendarDayCell(weekdays[index], day, orders, true);
-            week.addView(cell, new LinearLayout.LayoutParams(0, dp(68), 1));
+            LinearLayout column = new LinearLayout(this);
+            column.setOrientation(LinearLayout.VERTICAL);
+            column.setGravity(Gravity.CENTER_HORIZONTAL);
+            TextView weekday = text(weekdays[index], 11, MUTED, Typeface.BOLD);
+            weekday.setGravity(Gravity.CENTER);
+            column.addView(weekday, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(22)));
+            boolean selected = sameDay(day.getTimeInMillis(), calendarSelected.getTimeInMillis());
+            boolean today = sameDay(day.getTimeInMillis(), System.currentTimeMillis());
+            TextView date = text(String.valueOf(day.get(Calendar.DAY_OF_MONTH)), 14,
+                    selected ? Color.WHITE : INK, selected ? Typeface.BOLD : Typeface.NORMAL);
+            date.setGravity(Gravity.CENTER);
+            date.setBackground(selected ? circleDrawable(BLUE)
+                    : rounded(Color.TRANSPARENT, 20, today ? 1 : 0, BLUE));
+            date.setClickable(true);
+            date.setFocusable(true);
+            long selectedTime = day.getTimeInMillis();
+            date.setOnClickListener(view -> {
+                calendarSelected.setTimeInMillis(selectedTime);
+                showCalendar();
+            });
+            addRipple(date);
+            column.addView(date, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            week.addView(column, new LinearLayout.LayoutParams(0, dp(64), 1));
             day.add(Calendar.DAY_OF_MONTH, 1);
         }
-        body.addView(week, topMargin(-1, 10));
+        body.addView(week, topMargin(-1, 12));
     }
 
     private void renderMonthGrid(LinearLayout body) {
@@ -496,7 +653,7 @@ public class MainActivity extends Activity {
     }
 
     private void showOrders() {
-        LinearLayout root = page("Заказы", "Все работы и статусы", null);
+        LinearLayout root = page("Заказы", "", null);
         LinearLayout body = bodyOf(scrollBody(root));
         Button add = primaryButton("+  Новая запись");
         add.setOnClickListener(view -> showNewOrderDialog());
@@ -572,7 +729,7 @@ public class MainActivity extends Activity {
         LinearLayout body = bodyOf(scrollBody(root));
         body.addView(actionCard("Клиенты", "Контакты и история заказов", () -> showClients()));
         body.addView(actionCard("История заказов", "Поиск по заказам и клиентам", () -> showOrderHistory()), topMargin(-1, 12));
-        body.addView(actionCard("Услуги", "Названия, цены и длительность", () -> showServices()), topMargin(-1, 12));
+        body.addView(actionCard("Услуги", "Названия и длительность работ", () -> showServices()), topMargin(-1, 12));
         body.addView(actionCard("Марки автомобилей", "Справочник для быстрого ввода", () -> showCarMakes()), topMargin(-1, 12));
         body.addView(actionCard("Обновления", "Проверка новых версий через GitHub", () -> showUpdates()), topMargin(-1, 12));
         body.addView(actionCard("О приложении", "Версия и перенос базы данных", this::showAbout), topMargin(-1, 12));
@@ -840,23 +997,68 @@ public class MainActivity extends Activity {
     private void showCarModelDetail(String modelId, Runnable back) {
         Models.CarModel model = store.carModelById(modelId);
         if (model == null) { back.run(); return; }
-        navigation.setVisibility(View.GONE);
-        LinearLayout root = page(model.name, model.make, back);
+        showNavigationSelection("more");
+        LinearLayout root = page("Карточка модели", "", back, () -> editCarModel(model, model.make, back));
         LinearLayout body = bodyOf(scrollBody(root));
-        LinearLayout modelCard = cardWithColor(Color.rgb(239, 246, 255));
-        modelCard.addView(text(model.make + " • " + model.name, 21, INK, Typeface.BOLD));
-        modelCard.addView(text("Постоянное примечание к модели", 12, MUTED, Typeface.BOLD), topMargin(-1, 14));
-        modelCard.addView(text(model.note.isEmpty() ? "Примечаний пока нет" : model.note, 15,
-                model.note.isEmpty() ? MUTED : INK, Typeface.NORMAL), topMargin(-1, 5));
+
+        LinearLayout modelCard = card();
+        modelCard.setOrientation(LinearLayout.HORIZONTAL);
+        modelCard.setGravity(Gravity.CENTER_VERTICAL);
+        modelCard.setPadding(dp(14), dp(16), dp(14), dp(16));
+        FrameLayout carBadge = new FrameLayout(this);
+        carBadge.setBackground(circleWithStroke(Color.rgb(248, 250, 252), BORDER, 1));
+        ImageView carIcon = iconView(R.drawable.ic_car, "Модель автомобиля", BLUE);
+        carBadge.addView(carIcon, new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER));
+        modelCard.addView(carBadge, new LinearLayout.LayoutParams(dp(78), dp(78)));
+        LinearLayout modelCopy = new LinearLayout(this);
+        modelCopy.setOrientation(LinearLayout.VERTICAL);
+        modelCopy.addView(text(vehicle(model.make, model.name, ""), 22, INK, Typeface.BOLD));
+        modelCopy.addView(text("Модель автомобиля", 14, MUTED, Typeface.NORMAL), topMargin(-1, 3));
+        LinearLayout.LayoutParams makeChipParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        makeChipParams.topMargin = dp(9);
+        modelCopy.addView(outlineChip(model.make), makeChipParams);
+        modelCard.addView(modelCopy, leftMargin(-1, 16, 1));
         body.addView(modelCard);
+
         int clients = 0; int orders = 0;
         for (Models.Client client : store.clients) if (client.carModelId.equals(model.id)) clients++;
         for (Models.Order order : store.orders) if (order.carModelId.equals(model.id)) orders++;
-        body.addView(infoRow("Клиентов с этой моделью", String.valueOf(clients), BLUE), topMargin(-1, 14));
-        body.addView(infoRow("Заказов с этой моделью", String.valueOf(orders), BLUE), topMargin(-1, 8));
+
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+        metrics.addView(clientMetricCard(String.valueOf(clients),
+                countCaption(clients, "клиент", "клиента", "клиентов").replaceFirst("^\\d+\\s+", ""),
+                R.drawable.ic_user_outline), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        metrics.addView(new Space(this), new LinearLayout.LayoutParams(dp(10), 1));
+        metrics.addView(clientMetricCard(String.valueOf(orders),
+                countCaption(orders, "заказ", "заказа", "заказов").replaceFirst("^\\d+\\s+", ""),
+                R.drawable.ic_nav_orders), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        body.addView(metrics, topMargin(-1, 14));
+
+        body.addView(sectionTitle("Постоянное примечание"), topMargin(-1, 24));
+        LinearLayout noteCard = card();
+        noteCard.setOrientation(LinearLayout.HORIZONTAL);
+        noteCard.setGravity(Gravity.CENTER_VERTICAL);
+        noteCard.setPadding(dp(12), dp(13), dp(12), dp(13));
+        FrameLayout infoBadge = new FrameLayout(this);
+        infoBadge.setBackground(circleDrawable(Color.rgb(239, 246, 255)));
+        ImageView infoIcon = iconView(R.drawable.ic_info_outline, "Постоянное примечание", BLUE);
+        infoBadge.addView(infoIcon, new FrameLayout.LayoutParams(dp(27), dp(27), Gravity.CENTER));
+        noteCard.addView(infoBadge, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView note = text(model.note.isEmpty() ? "Примечаний пока нет" : model.note, 14,
+                model.note.isEmpty() ? MUTED : INK, Typeface.NORMAL);
+        noteCard.addView(note, leftMargin(-1, 12, 1));
+        TextView chevron = text("›", 27, INK, Typeface.NORMAL);
+        chevron.setGravity(Gravity.CENTER);
+        noteCard.addView(chevron, new LinearLayout.LayoutParams(dp(28), dp(48)));
+        noteCard.setClickable(true);
+        noteCard.setOnClickListener(view -> editCarModel(model, model.make, back));
+        addRipple(noteCard);
+        body.addView(noteCard, topMargin(-1, 10));
+
         Button edit = primaryButton("Изменить карточку модели");
         edit.setOnClickListener(view -> editCarModel(model, model.make, back));
-        body.addView(edit, topMargin(-1, 18));
+        body.addView(edit, topMargin(-1, 180));
         setPage(root);
     }
 
@@ -995,7 +1197,7 @@ public class MainActivity extends Activity {
 
     private void showServices() {
         navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Услуги", "Настраивайте под свою работу", () -> showRoute("more"));
+        LinearLayout root = page("Услуги", "Названия и длительность работ", () -> showRoute("more"));
         LinearLayout body = bodyOf(scrollBody(root));
         Button add = primaryButton("+  Новая услуга");
         add.setOnClickListener(view -> editService(null));
@@ -1006,7 +1208,7 @@ public class MainActivity extends Activity {
             item.setOnClickListener(view -> editService(service));
             addRipple(item);
             item.addView(text(service.name, 17, INK, Typeface.BOLD));
-            item.addView(text(service.category + " • " + money(service.price) + " • " + duration(service.durationMinutes), 14, MUTED, Typeface.NORMAL), topMargin(-1, 6));
+            item.addView(text(service.category + " • " + duration(service.durationMinutes), 14, MUTED, Typeface.NORMAL), topMargin(-1, 6));
             item.addView(text("Нажмите, чтобы изменить", 12, BLUE, Typeface.NORMAL), topMargin(-1, 9));
             body.addView(item, topMargin(-1, 12));
         }
@@ -1064,43 +1266,26 @@ public class MainActivity extends Activity {
     private void showClientDetail(String clientId, Runnable back) {
         Models.Client client = store.clientById(clientId);
         if (client == null) return;
-        navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Клиент", vehicle(client.car, client.carModel, client.plate), back);
+        showNavigationSelection("orders");
+        LinearLayout root = page("Клиент", "", back, () -> showClientActions(client, back));
         LinearLayout body = bodyOf(scrollBody(root));
-        LinearLayout profile = cardWithColor(Color.rgb(239, 246, 255));
-        LinearLayout identity = new LinearLayout(this);
-        identity.setOrientation(LinearLayout.HORIZONTAL);
-        identity.setGravity(Gravity.CENTER_VERTICAL);
-        TextView avatar = text(client.name.trim().isEmpty() ? "?" : client.name.trim().substring(0, 1).toUpperCase(ru), 24, Color.WHITE, Typeface.BOLD);
-        avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(rounded(BLUE, 18, 0, Color.TRANSPARENT));
-        identity.addView(avatar, new LinearLayout.LayoutParams(dp(56), dp(56)));
-        LinearLayout details = new LinearLayout(this);
-        details.setOrientation(LinearLayout.VERTICAL);
-        details.addView(text(client.name, 21, INK, Typeface.BOLD));
-        details.addView(text(client.phone.isEmpty() ? "Телефон не указан" : client.phone, 15, MUTED, Typeface.NORMAL), topMargin(-1, 5));
-        identity.addView(details, leftMargin(-1, 14, 1));
-        profile.addView(identity);
-        profile.addView(text(vehicle(client.car, client.carModel, client.plate), 15, BLUE_DARK, Typeface.BOLD), topMargin(-1, 14));
+        LinearLayout profile = new LinearLayout(this);
+        profile.setOrientation(LinearLayout.HORIZONTAL);
+        profile.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout avatar = new FrameLayout(this);
+        avatar.setBackground(circleWithStroke(SURFACE, BORDER, 1));
+        ImageView avatarIcon = iconView(R.drawable.ic_user_outline, "Клиент", MUTED);
+        avatar.addView(avatarIcon, new FrameLayout.LayoutParams(dp(45), dp(45), Gravity.CENTER));
+        profile.addView(avatar, new LinearLayout.LayoutParams(dp(78), dp(78)));
+        LinearLayout clientCopy = new LinearLayout(this);
+        clientCopy.setOrientation(LinearLayout.VERTICAL);
+        clientCopy.addView(text(client.name, 20, INK, Typeface.BOLD));
+        clientCopy.addView(profileInfoLine(R.drawable.ic_phone,
+                client.phone.isEmpty() ? "Телефон не указан" : client.phone), topMargin(-1, 6));
+        clientCopy.addView(profileInfoLine(R.drawable.ic_car,
+                vehicle(client.car, client.carModel, client.plate)), topMargin(-1, 5));
+        profile.addView(clientCopy, leftMargin(-1, 16, 1));
         body.addView(profile);
-        Button editVehicle = outlineButton("Изменить автомобиль", BLUE);
-        editVehicle.setOnClickListener(view -> editClientVehicle(client, back));
-        body.addView(editVehicle, topMargin(-1, 12));
-        if (store.carModelById(client.carModelId) != null) {
-            Button modelCard = outlineButton("Открыть карточку модели", BLUE_DARK);
-            modelCard.setOnClickListener(view -> showCarModelDetail(client.carModelId, () -> showClientDetail(client.id, back)));
-            body.addView(modelCard, topMargin(-1, 10));
-        }
-
-        LinearLayout actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL);
-        Button call = outlineButton("Позвонить", BLUE);
-        call.setOnClickListener(view -> openIntent(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + client.phone))));
-        Button sms = outlineButton("Написать", BLUE);
-        sms.setOnClickListener(view -> openIntent(new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + client.phone))));
-        actions.addView(call, new LinearLayout.LayoutParams(0, dp(54), 1));
-        actions.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
-        actions.addView(sms, new LinearLayout.LayoutParams(0, dp(54), 1));
-        body.addView(actions, topMargin(-1, 14));
         int orderCount = 0;
         long orderTotal = 0;
         List<Models.Order> history = new ArrayList<>();
@@ -1113,17 +1298,50 @@ public class MainActivity extends Activity {
         history.sort((a, b) -> Long.compare(b.startAt, a.startAt));
         LinearLayout summary = new LinearLayout(this);
         summary.setOrientation(LinearLayout.HORIZONTAL);
-        summary.addView(metricCard("Заказов", String.valueOf(orderCount), BLUE), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        summary.addView(clientMetricCard(String.valueOf(orderCount),
+                countCaption(orderCount, "заказ", "заказа", "заказов").replaceFirst("^\\d+\\s+", ""),
+                R.drawable.ic_nav_orders), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         summary.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
-        summary.addView(metricCard("На сумму", money(orderTotal), GREEN), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        body.addView(summary, topMargin(-1, 18));
-        body.addView(sectionTitle("История заказов"), topMargin(-1, 24));
+        summary.addView(clientMetricCard(money(orderTotal), "потрачено", R.drawable.ic_wallet), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        body.addView(summary, topMargin(-1, 20));
+
+        LinearLayout actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button call = iconButton("Позвонить", R.drawable.ic_phone);
+        call.setOnClickListener(view -> openIntent(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + client.phone))));
+        Button sms = iconButton("Написать", R.drawable.ic_message);
+        sms.setOnClickListener(view -> openIntent(new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + client.phone))));
+        actions.addView(call, new LinearLayout.LayoutParams(0, dp(50), 1));
+        actions.addView(new Space(this), new LinearLayout.LayoutParams(dp(10), 1));
+        actions.addView(sms, new LinearLayout.LayoutParams(0, dp(50), 1));
+        body.addView(actions, topMargin(-1, 12));
+
+        body.addView(sectionTitle("История заказов"), topMargin(-1, 22));
         if (history.isEmpty()) body.addView(emptyCard("Заказов пока нет", "Создайте первую запись для этого клиента."), topMargin(-1, 10));
-        for (Models.Order order : history) body.addView(orderCard(order), topMargin(-1, 10));
+        if (!history.isEmpty()) body.addView(clientHistoryCard(history.get(0)), topMargin(-1, 10));
+        if (history.size() > 1) {
+            TextView showAll = text("Показать всю историю", 14, BLUE, Typeface.BOLD);
+            showAll.setGravity(Gravity.CENTER);
+            showAll.setPadding(0, dp(13), 0, dp(7));
+            showAll.setOnClickListener(view -> showOrderHistory());
+            showAll.setClickable(true);
+            body.addView(showAll);
+        }
         Button add = primaryButton("+  Новый заказ");
         add.setOnClickListener(view -> showNewOrderDialog(client));
-        body.addView(add, topMargin(-1, 20));
+        body.addView(add, topMargin(-1, 16));
         setPage(root);
+    }
+
+    private void showClientActions(Models.Client client, Runnable back) {
+        Models.CarModel model = store.carModelById(client.carModelId);
+        String[] actions = model == null
+                ? new String[]{"Изменить автомобиль"}
+                : new String[]{"Изменить автомобиль", "Открыть карточку модели"};
+        AlertDialog dialog = new AlertDialog.Builder(this).setItems(actions, (ignored, which) -> {
+            if (which == 0) editClientVehicle(client, back);
+            else showCarModelDetail(model.id, () -> showClientDetail(client.id, back));
+        }).create();
+        showStyledDialog(dialog);
     }
 
     private void editClientVehicle(Models.Client client, Runnable back) {
@@ -1176,109 +1394,100 @@ public class MainActivity extends Activity {
     private void showOrderDetail(String orderId, Runnable back) {
         Models.Order order = store.orderById(orderId);
         if (order == null) return;
-        navigation.setVisibility(View.GONE);
-        LinearLayout root = page("Заказ #" + order.id, order.status, back);
+        showNavigationSelection("orders");
+        LinearLayout root = page("Заказ #" + order.id, "", back, () -> showOrderActions(order, back));
         LinearLayout body = bodyOf(scrollBody(root));
-
-        LinearLayout identity = card();
-        identity.setPadding(dp(14), dp(14), dp(14), dp(15));
-        LinearLayout links = new LinearLayout(this);
-        links.setOrientation(LinearLayout.HORIZONTAL);
         Models.Client client = store.clientById(order.clientId);
-        Button clientLink = compactLinkButton(order.clientName + "  ›");
-        clientLink.setContentDescription("Открыть карточку клиента " + order.clientName);
-        clientLink.setEnabled(client != null);
-        if (client != null) clientLink.setOnClickListener(view -> showClientDetail(client.id, () -> showOrderDetail(order.id, back)));
-        links.addView(clientLink, new LinearLayout.LayoutParams(0, dp(48), 1));
         Models.CarModel model = store.carModelById(order.carModelId);
-        String modelCaption = vehicle(order.car, order.carModel, "");
-        if (model != null) {
-            links.addView(new Space(this), new LinearLayout.LayoutParams(dp(9), 1));
-            Button modelLink = compactLinkButton(modelCaption + "  ›");
-            modelLink.setContentDescription("Открыть карточку модели " + modelCaption);
-            modelLink.setOnClickListener(view -> showCarModelDetail(model.id, () -> showOrderDetail(order.id, back)));
-            links.addView(modelLink, new LinearLayout.LayoutParams(0, dp(48), 1));
-        }
-        identity.addView(links);
-        String schedule = dateTime.format(new Date(order.startAt)) + "  →  " + dateTime.format(new Date(order.deadlineAt));
-        identity.addView(text(schedule, 14,
-                order.deadlineAt < System.currentTimeMillis() && !order.status.equals("Завершено") ? RED : MUTED,
-                Typeface.NORMAL), topMargin(-1, 12));
-        if (model == null && !modelCaption.isEmpty()) identity.addView(text(modelCaption, 13, MUTED, Typeface.BOLD), topMargin(-1, 4));
-        if (!order.plate.isEmpty()) identity.addView(text(order.plate, 13, MUTED, Typeface.BOLD), topMargin(-1, 4));
-        identity.addView(statusPill(order.status), topMargin(-1, 10));
-        Button reschedule = compactLinkButton("Перенести дату  ›");
-        reschedule.setContentDescription("Перенести дату заказа");
-        reschedule.setOnClickListener(view -> rescheduleOrder(order, back));
-        identity.addView(reschedule, topMargin(-1, 10));
-        body.addView(identity);
+        TextView statusTop = outlinedStatusPill(order.status);
+        statusTop.setGravity(Gravity.CENTER);
+        LinearLayout statusWrap = new LinearLayout(this);
+        statusWrap.setGravity(Gravity.END);
+        statusWrap.addView(statusTop);
+        body.addView(statusWrap);
 
-        LinearLayout noteHeader = sectionHeaderWithAction("Примечание", "+");
-        Button editNote = (Button) noteHeader.getChildAt(1);
-        editNote.setContentDescription(order.orderNote.isEmpty() ? "Добавить примечание к заказу" : "Изменить примечание к заказу");
-        editNote.setOnClickListener(view -> editOrderNote(order, back));
-        body.addView(noteHeader, topMargin(-1, 18));
-        if (!order.orderNote.isEmpty()) {
-            LinearLayout noteCard = cardWithColor(Color.rgb(248, 250, 252));
-            noteCard.setPadding(dp(15), dp(13), dp(15), dp(14));
-            noteCard.addView(text(order.orderNote, 14, INK, Typeface.NORMAL));
-            body.addView(noteCard, topMargin(-1, 5));
+        LinearLayout clientCard = orderClientCard(order, client);
+        if (client != null) {
+            clientCard.setClickable(true);
+            clientCard.setFocusable(true);
+            clientCard.setContentDescription("Открыть карточку клиента " + client.name);
+            clientCard.setOnClickListener(view -> showClientDetail(client.id, () -> showOrderDetail(order.id, back)));
+            addRipple(clientCard);
         }
+        body.addView(clientCard, topMargin(-1, 12));
 
-        body.addView(sectionTitle("Работы"), topMargin(-1, 22));
+        String schedule = dateTime.format(new Date(order.startAt)) + "  →  " + time.format(new Date(order.deadlineAt));
+        LinearLayout scheduleRow = detailLine(R.drawable.ic_nav_calendar, schedule, "");
+        scheduleRow.setClickable(true);
+        scheduleRow.setOnClickListener(view -> rescheduleOrder(order, back));
+        addRipple(scheduleRow);
+        body.addView(scheduleRow, topMargin(-1, 10));
+
+        body.addView(sectionTitle("Работы"), topMargin(-1, 20));
+        LinearLayout works = card();
+        works.setPadding(dp(14), dp(5), dp(14), dp(5));
+        int serviceIndex = 0;
         for (String serviceId : order.serviceIds) {
             Models.Service service = store.serviceById(serviceId);
-            if (service != null) body.addView(infoRow(service.name, duration(service.durationMinutes), BLUE), topMargin(-1, 8));
+            if (service != null) {
+                if (serviceIndex++ > 0) works.addView(thinDivider());
+                LinearLayout serviceRow = compactValueRow(service.name, duration(service.durationMinutes), money(order.servicePrice(serviceId)));
+                works.addView(serviceRow);
+            }
         }
-        body.addView(infoRow("Итого", money(order.total), INK), topMargin(-1, 10));
+        works.addView(thinDivider());
+        works.addView(compactValueRow("Итого", "", money(order.total)));
+        body.addView(works, topMargin(-1, 9));
 
+        body.addView(sectionTitle("Фото"), topMargin(-1, 20));
+        LinearLayout photos = new LinearLayout(this); photos.setOrientation(LinearLayout.HORIZONTAL);
+        photos.addView(photoTile(order, true, back), new LinearLayout.LayoutParams(0, dp(146), 1));
+        photos.addView(new Space(this), new LinearLayout.LayoutParams(dp(10), 1));
+        photos.addView(photoTile(order, false, back), new LinearLayout.LayoutParams(0, dp(146), 1));
+        body.addView(photos, topMargin(-1, 9));
+
+        Button status = primaryButton(nextStatusCaption(order.status));
+        status.setOnClickListener(view -> { advanceStatus(order); store.save(); showOrderDetail(order.id, back); });
+        body.addView(status, topMargin(-1, 18));
+        setPage(root);
+    }
+
+    private void showOrderActions(Models.Order order, Runnable back) {
+        List<String> captions = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        captions.add("Перенести дату");
+        actions.add(() -> rescheduleOrder(order, back));
+        captions.add(order.orderNote.isEmpty() ? "Добавить примечание" : "Примечание: " + order.orderNote);
+        actions.add(() -> editOrderNote(order, back));
         long advance = orderAdvance(order);
         long balance = orderBalance(order);
-        body.addView(sectionTitle("Оплата"), topMargin(-1, 22));
-        LinearLayout paymentSummary = card();
-        paymentSummary.addView(paymentPill(order));
-        if (advance > 0) paymentSummary.addView(text("Внесено авансом: " + money(advance), 15, INK, Typeface.BOLD), topMargin(-1, 10));
-        paymentSummary.addView(text(order.paid ? "Оплата по заказу закрыта" : "Осталось оплатить: " + money(balance),
-                14, order.paid ? GREEN : MUTED, Typeface.NORMAL), topMargin(-1, 7));
-        body.addView(paymentSummary, topMargin(-1, 8));
         if (!order.paid && balance > 0) {
-            Button addAdvance = outlineButton(advance > 0 ? "+ Добавить аванс" : "+ Внести аванс", GREEN);
-            addAdvance.setOnClickListener(view -> addAdvance(order, back));
-            body.addView(addAdvance, topMargin(-1, 10));
-            Button paid = outlineButton(advance > 0 ? "Остаток оплачен полностью" : "Отметить как оплаченный", BLUE);
-            paid.setOnClickListener(view -> {
+            captions.add((advance > 0 ? "Добавить аванс · осталось " : "Внести аванс · осталось ") + money(balance));
+            actions.add(() -> addAdvance(order, back));
+            captions.add(advance > 0 ? "Остаток оплачен полностью" : "Отметить как оплаченный");
+            actions.add(() -> {
                 order.paid = true;
                 store.save();
                 showOrderDetail(order.id, back);
             });
-            body.addView(paid, topMargin(-1, 10));
+        } else {
+            captions.add("Оплачено полностью");
+            actions.add(() -> toast("Оплата по заказу закрыта"));
         }
-
-        body.addView(sectionTitle("Расходы по заказу"), topMargin(-1, 22));
         long linkedExpenses = 0;
         for (Models.Transaction transaction : store.transactions) {
-            if (!transaction.income && order.id.equals(transaction.orderId)) {
-                linkedExpenses += transaction.amount;
-                body.addView(transactionCard(transaction), topMargin(-1, 8));
-            }
+            if (!transaction.income && order.id.equals(transaction.orderId)) linkedExpenses += transaction.amount;
         }
-        if (linkedExpenses == 0) body.addView(text("Расходов пока нет", 14, MUTED, Typeface.NORMAL), topMargin(-1, 8));
-        else body.addView(infoRow("Всего расходов", money(linkedExpenses), RED), topMargin(-1, 8));
-        Button addExpense = outlineButton("+ Добавить расход", AMBER);
-        addExpense.setOnClickListener(view -> addTransaction(false, order));
-        body.addView(addExpense, topMargin(-1, 10));
-
-        body.addView(sectionTitle("Фото до и после"), topMargin(-1, 22));
-        LinearLayout photos = new LinearLayout(this); photos.setOrientation(LinearLayout.HORIZONTAL);
-        photos.addView(photoTile(order, true, back), new LinearLayout.LayoutParams(0, dp(184), 1));
-        photos.addView(new Space(this), new LinearLayout.LayoutParams(dp(12), 1));
-        photos.addView(photoTile(order, false, back), new LinearLayout.LayoutParams(0, dp(184), 1));
-        body.addView(photos);
-
-        Button status = primaryButton(nextStatusCaption(order.status));
-        status.setOnClickListener(view -> { advanceStatus(order); store.save(); showOrderDetail(order.id, back); });
-        body.addView(status, topMargin(-1, 22));
-        setPage(root);
+        captions.add(linkedExpenses == 0 ? "Добавить расход" : "Расходы: " + money(linkedExpenses) + " · добавить");
+        actions.add(() -> addTransaction(false, order));
+        Models.CarModel model = store.carModelById(order.carModelId);
+        if (model != null) {
+            captions.add("Открыть карточку модели");
+            actions.add(() -> showCarModelDetail(model.id, () -> showOrderDetail(order.id, back)));
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setItems(captions.toArray(new String[0]), (ignored, which) -> actions.get(which).run()).create();
+        showStyledDialog(dialog);
     }
 
     private void addAdvance(Models.Order order, Runnable back) {
@@ -1355,7 +1564,7 @@ public class MainActivity extends Activity {
         List<String> uris = before ? order.beforeUris : order.afterUris;
         String uriText = uris.isEmpty() ? "" : uris.get(uris.size() - 1);
         FrameLayout frame = new FrameLayout(this);
-        frame.setBackground(rounded(Color.rgb(241, 245, 249), 18, 1, BORDER));
+        frame.setBackground(rounded(Color.rgb(241, 245, 249), 12, 1, BORDER));
         ImageView image = new ImageView(this);
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setContentDescription(before ? "Фото до работы" : "Фото после работы");
@@ -1363,8 +1572,14 @@ public class MainActivity extends Activity {
             try { image.setImageURI(Uri.parse(uriText)); } catch (Exception ignored) { }
         }
         frame.addView(image, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        String photoLabel = before ? "Фото до" : "Фото после";
-        TextView label = text(uriText.isEmpty() ? "+  " + photoLabel : photoLabel + " • " + uris.size(), 14,
+        if (uriText.isEmpty()) {
+            ImageView camera = iconView(R.drawable.ic_camera_outline, before ? "Добавить фото до" : "Добавить фото после", BLUE);
+            FrameLayout.LayoutParams cameraParams = new FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER);
+            cameraParams.bottomMargin = dp(18);
+            frame.addView(camera, cameraParams);
+        }
+        String photoLabel = before ? "До" : "После";
+        TextView label = text(uriText.isEmpty() ? photoLabel : photoLabel + " • " + uris.size(), 13,
                 uriText.isEmpty() ? BLUE : Color.WHITE, Typeface.BOLD);
         label.setGravity(Gravity.CENTER);
         label.setPadding(dp(10), 0, dp(10), 0);
@@ -1458,128 +1673,366 @@ public class MainActivity extends Activity {
     private void showNewOrderDialog() { showNewOrderDialog(null); }
 
     private void showNewOrderDialog(Models.Client preset) {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(4), dp(4), dp(4), dp(8));
-        scroll.addView(form);
+        NewOrderDraft draft = new NewOrderDraft();
+        String sourceRoute = route;
+        draft.cancel = preset == null ? () -> showRoute(sourceRoute) : () -> showClientDetail(preset.id);
+        if (preset != null) selectDraftClient(draft, preset);
+        showNewOrderClientStep(draft);
+    }
 
-        EditText name = field("Имя клиента", InputType.TYPE_CLASS_TEXT);
-        EditText phone = field("Телефон", InputType.TYPE_CLASS_PHONE);
-        AutoCompleteTextView car = autoCompleteField("Марка автомобиля", store.carMakes);
-        AutoCompleteTextView model = autoCompleteField("Модель автомобиля", new ArrayList<>());
-        EditText plate = field("Госномер (если известен)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-        EditText orderNote = multilineField("Что важно учесть в этом заказе");
-        bindMakeToModel(car, model, "");
+    private LinearLayout newOrderPage(int step, Runnable back) {
+        navigation.setVisibility(View.GONE);
+        LinearLayout root = page("Новая запись", step + " из 4", back);
+        LinearLayout progress = new LinearLayout(this);
+        progress.setOrientation(LinearLayout.HORIZONTAL);
+        progress.setPadding(dp(20), dp(4), dp(20), dp(8));
+        for (int index = 1; index <= 4; index++) {
+            View segment = new View(this);
+            segment.setBackground(rounded(index <= step ? BLUE : Color.rgb(219, 228, 242), 2, 0, Color.TRANSPARENT));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(4), 1);
+            if (index > 1) params.leftMargin = dp(4);
+            progress.addView(segment, params);
+        }
+        root.addView(progress);
+        return root;
+    }
 
-        LinearLayout clientSection = dialogSection("Клиент");
-        TextView clientState = text("", 14, BLUE_DARK, Typeface.BOLD);
-        clientState.setGravity(Gravity.CENTER_VERTICAL);
-        clientState.setMinHeight(dp(48));
-        clientState.setPadding(dp(12), dp(8), dp(12), dp(8));
-        clientSection.addView(clientState, topMargin(-1, 8));
-        clientSection.addView(labeled(name), topMargin(-1, 10));
-        clientSection.addView(labeled(phone), topMargin(-1, 8));
-        LinearLayout clientSuggestions = new LinearLayout(this);
-        clientSuggestions.setOrientation(LinearLayout.VERTICAL);
-        clientSection.addView(clientSuggestions, topMargin(-1, 4));
-        form.addView(clientSection);
+    private void addNewOrderFooter(LinearLayout root, String caption, Runnable action) {
+        LinearLayout footer = new LinearLayout(this);
+        footer.setPadding(dp(20), dp(8), dp(20), dp(12));
+        footer.setBackgroundColor(SURFACE);
+        Button button = primaryButton(caption);
+        button.setOnClickListener(view -> action.run());
+        footer.addView(button, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+        root.addView(footer);
+    }
 
-        LinearLayout vehicleSection = dialogSection("Автомобиль");
-        vehicleSection.addView(text("Начните вводить марку или выберите её из справочника.", 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
-        vehicleSection.addView(labeled(car), topMargin(-1, 10));
-        vehicleSection.addView(labeled(model), topMargin(-1, 8));
-        vehicleSection.addView(labeled(plate), topMargin(-1, 8));
-        form.addView(vehicleSection, topMargin(-1, 12));
+    private void showNewOrderClientStep(NewOrderDraft draft) {
+        LinearLayout root = newOrderPage(1, draft.cancel);
+        LinearLayout body = bodyOf(scrollBody(root));
+        LinearLayout section = referenceSection("Клиент");
+        EditText search = compactField("Поиск клиента", InputType.TYPE_CLASS_TEXT);
+        search.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0);
+        search.setCompoundDrawableTintList(ColorStateList.valueOf(MUTED));
+        search.setCompoundDrawablePadding(dp(10));
+        section.addView(search, topMargin(-1, 12));
+        LinearLayout choices = new LinearLayout(this);
+        choices.setOrientation(LinearLayout.VERTICAL);
+        section.addView(choices, topMargin(-1, 6));
+        body.addView(section);
 
-        Models.Client[] selectedClient = {preset};
-        boolean[] updatingClient = {false};
-        TextWatcher clientWatcher = new TextWatcher() {
+        Button useNew = textActionButton("+  Новый клиент");
+        useNew.setOnClickListener(view -> {
+            draft.selectedClient = null;
+            draft.creatingClient = true;
+            draft.clientName = "";
+            draft.phone = "";
+            showNewOrderClientStep(draft);
+        });
+        body.addView(useNew, topMargin(-1, 12));
+
+        LinearLayout newClient = referenceSection("Новый клиент");
+        EditText name = compactField("Имя клиента", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        EditText phone = compactField("Телефон", InputType.TYPE_CLASS_PHONE);
+        name.setText(draft.clientName);
+        phone.setText(draft.phone);
+        newClient.addView(labeled(name), topMargin(-1, 8));
+        newClient.addView(labeled(phone), topMargin(-1, 8));
+        newClient.setVisibility(draft.creatingClient ? View.VISIBLE : View.GONE);
+        body.addView(newClient, topMargin(-1, 12));
+
+        Runnable refresh = () -> renderDraftClientChoices(choices, search.getText().toString(), draft);
+        search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence value, int start, int before, int count) { }
-            @Override public void afterTextChanged(Editable value) {
-                refreshClientMatch(name, phone, car, model, plate, clientState, clientSuggestions, selectedClient, updatingClient);
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) { refresh.run(); }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        refresh.run();
+        addNewOrderFooter(root, "Продолжить  ›", () -> {
+            if (draft.selectedClient == null) {
+                if (!draft.creatingClient) { toast("Выберите клиента или создайте нового"); return; }
+                draft.clientName = name.getText().toString().trim();
+                draft.phone = phone.getText().toString().trim();
+                if (draft.clientName.isEmpty()) { name.setError("Укажите имя"); return; }
             }
-        };
-        name.addTextChangedListener(clientWatcher);
-        phone.addTextChangedListener(clientWatcher);
-        if (preset == null) {
-            refreshClientMatch(name, phone, car, model, plate, clientState, clientSuggestions, selectedClient, updatingClient);
-        } else {
-            applyClientSelection(preset, name, phone, car, model, plate, clientState, clientSuggestions, selectedClient, updatingClient);
+            showNewOrderVehicleStep(draft);
+        });
+        setPage(root);
+    }
+
+    private void renderDraftClientChoices(LinearLayout choices, String query, NewOrderDraft draft) {
+        choices.removeAllViews();
+        String normalized = query == null ? "" : query.trim().toLowerCase(ru);
+        String digits = query == null ? "" : query.replaceAll("[^0-9]", "");
+        int shown = 0;
+        for (Models.Client client : store.clients) {
+            boolean selected = draft.selectedClient != null && draft.selectedClient.id.equals(client.id);
+            if (draft.selectedClient != null && !selected) continue;
+            String searchable = (client.name + " " + client.phone + " " + vehicle(client.car, client.carModel, client.plate)).toLowerCase(ru);
+            if (!selected && !normalized.isEmpty() && !searchable.contains(normalized)
+                    && (digits.isEmpty() || !client.phone.replaceAll("[^0-9]", "").contains(digits))) continue;
+            if (!selected && normalized.isEmpty() && shown >= 3) continue;
+            shown++;
+            LinearLayout card = draftClientCard(client, selected);
+            card.setClickable(true); card.setFocusable(true);
+            card.setContentDescription("Выбрать клиента " + client.name);
+            card.setOnClickListener(view -> { selectDraftClient(draft, client); showNewOrderClientStep(draft); });
+            addRipple(card);
+            choices.addView(card, topMargin(-1, 8));
         }
+        if (shown == 0) choices.addView(text("Совпадений нет — заполните нового клиента ниже.", 13, MUTED, Typeface.NORMAL), topMargin(-1, 8));
+    }
 
-        LinearLayout workSection = dialogSection("Работы");
+    private LinearLayout draftClientCard(Models.Client client, boolean selected) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(10), dp(10));
+        card.setBackground(rounded(selected ? Color.rgb(248, 250, 255) : SURFACE, 10, 1, selected ? Color.rgb(191, 219, 254) : BORDER));
+        FrameLayout avatar = new FrameLayout(this);
+        avatar.setBackground(circleDrawable(Color.rgb(219, 234, 254)));
+        ImageView avatarIcon = iconView(R.drawable.ic_user_outline, "Клиент", BLUE);
+        avatar.addView(avatarIcon, new FrameLayout.LayoutParams(dp(25), dp(25), Gravity.CENTER));
+        card.addView(avatar, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(text(client.name, 15, INK, Typeface.BOLD));
+        copy.addView(text(client.phone, 13, MUTED, Typeface.NORMAL), topMargin(-1, 3));
+        card.addView(copy, leftMargin(-1, 12, 1));
+        TextView chevron = text("›", 27, INK, Typeface.NORMAL);
+        chevron.setGravity(Gravity.CENTER);
+        card.addView(chevron, new LinearLayout.LayoutParams(dp(30), dp(42)));
+        return card;
+    }
 
-        Map<CheckBox, Models.Service> selections = new HashMap<>();
+    private void selectDraftClient(NewOrderDraft draft, Models.Client client) {
+        draft.selectedClient = client;
+        draft.creatingClient = false;
+        draft.clientName = client.name;
+        draft.phone = client.phone;
+        draft.car = client.car;
+        draft.carModel = client.carModel;
+        draft.plate = client.plate;
+    }
+
+    private void showNewOrderVehicleStep(NewOrderDraft draft) {
+        LinearLayout root = newOrderPage(2, () -> showNewOrderClientStep(draft));
+        LinearLayout body = bodyOf(scrollBody(root));
+        LinearLayout section = referenceSection("Автомобиль");
+        if (draft.selectedClient != null) section.addView(draftClientCard(draft.selectedClient, true), topMargin(-1, 10));
+        AutoCompleteTextView make = autoCompleteField("Марка", store.carMakes);
+        AutoCompleteTextView model = autoCompleteField("Модель", carModelNames(draft.car));
+        make.setMinHeight(dp(50)); model.setMinHeight(dp(50));
+        EditText plate = compactField("Госномер", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        make.setText(draft.car); model.setText(draft.carModel); plate.setText(draft.plate);
+        bindMakeToModel(make, model, draft.car);
+        section.addView(referenceLabeled(make), topMargin(-1, 14));
+        section.addView(referenceLabeled(model), topMargin(-1, 8));
+        section.addView(referenceLabeled(plate), topMargin(-1, 8));
+        section.addView(text("Данные можно изменить для этой записи.", 13, MUTED, Typeface.NORMAL), topMargin(-1, 12));
+        body.addView(section);
+        addNewOrderFooter(root, "Продолжить  ›", () -> {
+            draft.car = make.getText().toString().trim();
+            draft.carModel = model.getText().toString().trim();
+            draft.plate = plate.getText().toString().trim().toUpperCase(ru);
+            if (draft.car.isEmpty()) { make.setError("Укажите марку"); return; }
+            if (draft.carModel.isEmpty()) { model.setError("Укажите модель"); return; }
+            showNewOrderWorkStep(draft);
+        });
+        setPage(root);
+    }
+
+    private void showNewOrderWorkStep(NewOrderDraft draft) {
+        LinearLayout root = newOrderPage(3, () -> showNewOrderVehicleStep(draft));
+        LinearLayout body = bodyOf(scrollBody(root));
+        LinearLayout section = referenceSection("Работы");
+        section.addView(text("Выберите работы и укажите цену каждой в этом заказе.", 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
+        Map<String, EditText> priceInputs = new HashMap<>();
+        TextView selectedSummary = text("", 14, MUTED, Typeface.NORMAL);
+        TextView totalSummary = text("", 22, INK, Typeface.BOLD);
         for (Models.Service service : store.services) {
+            LinearLayout serviceCard = card();
+            serviceCard.setPadding(dp(11), dp(5), dp(11), dp(7));
             CheckBox check = new CheckBox(this);
-            check.setText(service.name + "\n" + money(service.price) + " • " + duration(service.durationMinutes));
-            check.setTextColor(INK); check.setTextSize(15); check.setPadding(dp(4), dp(7), dp(4), dp(7)); check.setButtonTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{BLUE, MUTED}));
-            workSection.addView(check, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
-            selections.put(check, service);
+            check.setText(service.name + "  •  " + duration(service.durationMinutes));
+            check.setTextColor(INK); check.setTextSize(15); check.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            check.setPadding(0, 0, 0, 0); check.setMinHeight(dp(42));
+            check.setButtonTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{BLUE, MUTED}));
+            LinearLayout priceSlot = new LinearLayout(this); priceSlot.setOrientation(LinearLayout.VERTICAL);
+            boolean selected = draft.serviceIds.contains(service.id);
+            check.setChecked(selected);
+            serviceCard.addView(check);
+            serviceCard.addView(priceSlot);
+            if (selected) addDraftPriceField(priceSlot, service, draft, priceInputs, selectedSummary, totalSummary);
+            check.setOnCheckedChangeListener((button, checked) -> {
+                if (checked) {
+                    if (!draft.serviceIds.contains(service.id)) draft.serviceIds.add(service.id);
+                    addDraftPriceField(priceSlot, service, draft, priceInputs, selectedSummary, totalSummary);
+                } else {
+                    draft.serviceIds.remove(service.id);
+                    draft.servicePrices.remove(service.id);
+                    priceInputs.remove(service.id);
+                    priceSlot.removeAllViews();
+                    updateDraftWorkSummary(draft, selectedSummary, totalSummary);
+                }
+            });
+            section.addView(serviceCard, topMargin(-1, 8));
         }
-        if (store.services.isEmpty()) workSection.addView(text("Сначала добавьте хотя бы одну услугу в разделе «Ещё». ", 14, RED, Typeface.NORMAL), topMargin(-1, 8));
-        form.addView(workSection, topMargin(-1, 12));
-
-        Calendar selected = Calendar.getInstance(); selected.add(Calendar.HOUR_OF_DAY, 1); selected.set(Calendar.MINUTE, 0);
-        Button when = outlineButton("Время: " + dateTime.format(selected.getTime()), BLUE);
-        when.setOnClickListener(view -> chooseDateTime(selected, when));
-        LinearLayout scheduleSection = dialogSection("Время записи");
-        scheduleSection.addView(text("Начало и дедлайн рассчитываются по длительности выбранных работ.", 13, MUTED, Typeface.NORMAL));
-        scheduleSection.addView(when, topMargin(-1, 9));
-        form.addView(scheduleSection, topMargin(-1, 12));
-
-        LinearLayout noteSection = dialogSection("Примечание к заказу");
-        noteSection.addView(text("Это примечание сохранится только в создаваемом заказе.", 13, MUTED, Typeface.NORMAL), topMargin(-1, 7));
-        noteSection.addView(labeled(orderNote), topMargin(-1, 9));
-        form.addView(noteSection, topMargin(-1, 12));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Новая запись")
-                .setView(scroll)
-                .setNegativeButton("Отменить", null)
-                .setPositiveButton("Создать запись", null)
-                .create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
-            String clientName = name.getText().toString().trim();
-            String phoneText = phone.getText().toString().trim();
-            String carText = car.getText().toString().trim();
-            String modelText = model.getText().toString().trim();
-            String plateText = plate.getText().toString().trim().toUpperCase(ru);
-            String orderNoteText = orderNote.getText().toString().trim();
-            List<Models.Service> chosen = new ArrayList<>();
-            for (Map.Entry<CheckBox, Models.Service> entry : selections.entrySet()) if (entry.getKey().isChecked()) chosen.add(entry.getValue());
-            if (clientName.isEmpty()) { name.setError("Укажите имя"); return; }
-            if (carText.isEmpty()) { car.setError("Укажите автомобиль"); return; }
-            if (modelText.isEmpty()) { model.setError("Укажите модель"); return; }
-            if (chosen.isEmpty()) { toast("Выберите хотя бы одну работу"); return; }
-
-            Models.CarModel selectedModel = store.ensureCarModel(carText, modelText);
-            if (selectedModel == null) { model.setError("Укажите модель"); return; }
-
-            Models.Client client = selectedClient[0] != null ? selectedClient[0] : store.findClientByNameOrPhone(clientName, phoneText);
-            if (client == null) {
-                client = new Models.Client(store.newId(), clientName, phoneText, carText, selectedModel.id, selectedModel.name, plateText);
-                store.clients.add(client);
-            } else {
-                client.name = clientName; client.phone = phoneText; client.car = carText;
-                client.carModelId = selectedModel.id; client.carModel = selectedModel.name; client.plate = plateText;
-                if (!client.legacyCarNote.isEmpty() && selectedModel.note.isEmpty()) selectedModel.note = client.legacyCarNote;
-                client.legacyCarNote = "";
+        if (store.services.isEmpty()) section.addView(text("Сначала добавьте услугу в разделе «Ещё».", 14, RED, Typeface.NORMAL), topMargin(-1, 10));
+        LinearLayout.LayoutParams workDividerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        workDividerParams.topMargin = dp(10);
+        section.addView(thinDivider(), workDividerParams);
+        selectedSummary.setPadding(0, dp(10), 0, dp(7));
+        section.addView(selectedSummary);
+        LinearLayout totalRow = new LinearLayout(this); totalRow.setOrientation(LinearLayout.HORIZONTAL); totalRow.setGravity(Gravity.CENTER_VERTICAL);
+        totalRow.setPadding(0, dp(10), 0, dp(6));
+        totalRow.addView(text("Итого", 16, INK, Typeface.BOLD), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        totalRow.addView(totalSummary);
+        section.addView(totalRow);
+        body.addView(section);
+        updateDraftWorkSummary(draft, selectedSummary, totalSummary);
+        addNewOrderFooter(root, "Продолжить  ›", () -> {
+            if (draft.serviceIds.isEmpty()) { toast("Выберите хотя бы одну работу"); return; }
+            for (String serviceId : draft.serviceIds) {
+                EditText input = priceInputs.get(serviceId);
+                long value = input == null ? draft.servicePrices.getOrDefault(serviceId, 0L) : parseLong(input.getText().toString());
+                if (value <= 0) { if (input != null) input.setError("Укажите цену"); return; }
+                draft.servicePrices.put(serviceId, value);
             }
-            store.addCarMake(carText);
-            long total = 0; int minutes = 0;
-            for (Models.Service service : chosen) { total += service.price; minutes += service.durationMinutes; }
-            long start = selected.getTimeInMillis();
-            String number = String.valueOf(100 + store.orders.size() + 1);
-            Models.Order order = new Models.Order(number, client.id, client.name, client.phone, client.car,
-                    client.carModelId, client.carModel, client.plate, orderNoteText,
-                    total, start, start + minutes * 60000L, "Запланировано", false);
-            for (Models.Service service : chosen) order.serviceIds.add(service.id);
-            store.orders.add(order); store.sortOrders(); store.save();
+            showNewOrderFinalStep(draft);
+        });
+        setPage(root);
+    }
+
+    private void addDraftPriceField(LinearLayout slot, Models.Service service, NewOrderDraft draft,
+                                    Map<String, EditText> inputs, TextView selectedSummary, TextView totalSummary) {
+        if (inputs.containsKey(service.id)) return;
+        slot.removeAllViews();
+        EditText price = compactField("Цена в этом заказе", InputType.TYPE_CLASS_NUMBER);
+        Long saved = draft.servicePrices.get(service.id);
+        if (saved != null && saved > 0) price.setText(String.valueOf(saved));
+        inputs.put(service.id, price);
+        slot.addView(currencyLabeled(price), topMargin(-1, 4));
+        price.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                draft.servicePrices.put(service.id, parseLong(value == null ? "" : value.toString()));
+                updateDraftWorkSummary(draft, selectedSummary, totalSummary);
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        updateDraftWorkSummary(draft, selectedSummary, totalSummary);
+    }
+
+    private void updateDraftWorkSummary(NewOrderDraft draft, TextView selectedSummary, TextView totalSummary) {
+        int minutes = draftDuration(draft);
+        selectedSummary.setText(countCaption(draft.serviceIds.size(), "работа", "работы", "работ") + "  •  " + duration(minutes));
+        totalSummary.setText(money(draftTotal(draft)));
+    }
+
+    private int draftDuration(NewOrderDraft draft) {
+        int minutes = 0;
+        for (String id : draft.serviceIds) { Models.Service service = store.serviceById(id); if (service != null) minutes += service.durationMinutes; }
+        return minutes;
+    }
+
+    private long draftTotal(NewOrderDraft draft) {
+        long total = 0;
+        for (String id : draft.serviceIds) total += Math.max(0, draft.servicePrices.getOrDefault(id, 0L));
+        return total;
+    }
+
+    private void showNewOrderFinalStep(NewOrderDraft draft) {
+        LinearLayout root = newOrderPage(4, () -> showNewOrderWorkStep(draft));
+        LinearLayout body = bodyOf(scrollBody(root));
+        LinearLayout schedule = referenceSection("Дата и время");
+        LinearLayout dateRow = new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout calendarBadge = new FrameLayout(this);
+        calendarBadge.setBackground(circleDrawable(Color.rgb(219, 234, 254)));
+        ImageView calendarIcon = iconView(R.drawable.ic_nav_calendar, "Дата и время", BLUE);
+        calendarBadge.addView(calendarIcon, new FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER));
+        dateRow.addView(calendarBadge, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        LinearLayout dateCopy = new LinearLayout(this);
+        dateCopy.setOrientation(LinearLayout.VERTICAL);
+        Button when = textActionButton(dateTime.format(draft.start.getTime()));
+        when.setTextColor(INK);
+        when.setTextSize(16);
+        when.setPadding(0, 0, 0, 0);
+        TextView deadline = text("Дедлайн: " + time.format(new Date(draft.start.getTimeInMillis() + draftDuration(draft) * 60000L)), 14, MUTED, Typeface.NORMAL);
+        when.setOnClickListener(view -> chooseDateTime(draft.start, when, "", () -> deadline.setText("Дедлайн: " + time.format(new Date(draft.start.getTimeInMillis() + draftDuration(draft) * 60000L)))));
+        dateCopy.addView(when, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28)));
+        dateCopy.addView(deadline, topMargin(-1, 2));
+        dateRow.addView(dateCopy, leftMargin(-1, 12, 1));
+        schedule.addView(dateRow, topMargin(-1, 10));
+        body.addView(schedule);
+
+        LinearLayout noteSection = referenceSection("Примечание");
+        TextView notePreview = text(draft.note.isEmpty() ? "Добавить примечание   ›" : draft.note + "   ›", 14,
+                draft.note.isEmpty() ? BLUE : INK, draft.note.isEmpty() ? Typeface.BOLD : Typeface.NORMAL);
+        notePreview.setPadding(0, dp(9), 0, dp(7));
+        notePreview.setClickable(true);
+        notePreview.setOnClickListener(view -> editDraftNote(draft, notePreview));
+        noteSection.addView(notePreview, topMargin(-1, 3));
+        body.addView(noteSection, topMargin(-1, 12));
+
+        LinearLayout summary = referenceSection("");
+        summary.addView(text(draft.clientName + "  •  " + vehicle(draft.car, draft.carModel, draft.plate), 15, INK, Typeface.BOLD));
+        int summaryIndex = 0;
+        for (String serviceId : draft.serviceIds) {
+            Models.Service service = store.serviceById(serviceId);
+            if (service != null) {
+                if (summaryIndex++ > 0) summary.addView(thinDivider());
+                summary.addView(compactValueRow(service.name, duration(service.durationMinutes), money(draft.servicePrices.getOrDefault(serviceId, 0L))));
+            }
+        }
+        summary.addView(thinDivider());
+        summary.addView(compactValueRow("Итого", "", money(draftTotal(draft))));
+        body.addView(summary, topMargin(-1, 12));
+        addNewOrderFooter(root, "Создать запись  ✓", () -> createOrder(draft));
+        setPage(root);
+    }
+
+    private void editDraftNote(NewOrderDraft draft, TextView preview) {
+        LinearLayout form = dialogForm();
+        EditText note = multilineField("Что важно учесть в этом заказе");
+        note.setText(draft.note);
+        form.addView(labeled(note));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Примечание")
+                .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            draft.note = note.getText().toString().trim();
+            preview.setText(draft.note.isEmpty() ? "Добавить примечание   ›" : draft.note + "   ›");
+            preview.setTextColor(draft.note.isEmpty() ? BLUE : INK);
             dialog.dismiss();
-            showOrderDetail(order.id);
         }));
         showStyledDialog(dialog);
+    }
+
+    private void createOrder(NewOrderDraft draft) {
+        Models.CarModel selectedModel = store.ensureCarModel(draft.car, draft.carModel);
+        if (selectedModel == null) { toast("Не удалось сохранить модель автомобиля"); return; }
+        Models.Client client = draft.selectedClient != null ? draft.selectedClient : store.findClientByNameOrPhone(draft.clientName, draft.phone);
+        if (client == null) {
+            client = new Models.Client(store.newId(), draft.clientName, draft.phone, draft.car, selectedModel.id, selectedModel.name, draft.plate);
+            store.clients.add(client);
+        } else {
+            client.name = draft.clientName; client.phone = draft.phone; client.car = draft.car;
+            client.carModelId = selectedModel.id; client.carModel = selectedModel.name; client.plate = draft.plate;
+            if (!client.legacyCarNote.isEmpty() && selectedModel.note.isEmpty()) selectedModel.note = client.legacyCarNote;
+            client.legacyCarNote = "";
+        }
+        store.addCarMake(draft.car);
+        long start = draft.start.getTimeInMillis();
+        String number = String.valueOf(100 + store.orders.size() + 1);
+        Models.Order order = new Models.Order(number, client.id, client.name, client.phone, client.car,
+                client.carModelId, client.carModel, client.plate, draft.note, draftTotal(draft), start,
+                start + draftDuration(draft) * 60000L, "Запланировано", false);
+        order.serviceIds.addAll(draft.serviceIds);
+        for (String serviceId : draft.serviceIds) order.servicePrices.put(serviceId, draft.servicePrices.getOrDefault(serviceId, 0L));
+        store.orders.add(order); store.sortOrders(); store.save();
+        showOrderDetail(order.id);
     }
 
     private void refreshClientMatch(EditText name, EditText phone, EditText car, EditText model, EditText plate,
@@ -1662,13 +2115,12 @@ public class MainActivity extends Activity {
         LinearLayout form = dialogForm();
         EditText name = field("Название услуги", InputType.TYPE_CLASS_TEXT);
         EditText category = field("Категория", InputType.TYPE_CLASS_TEXT);
-        EditText price = field("Цена, ₽", InputType.TYPE_CLASS_NUMBER);
         EditText hours = field("Длительность, часов", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         if (existing != null) {
-            name.setText(existing.name); category.setText(existing.category); price.setText(String.valueOf(existing.price));
+            name.setText(existing.name); category.setText(existing.category);
             hours.setText(String.format(ru, "%.1f", existing.durationMinutes / 60f));
         }
-        form.addView(labeled(name)); form.addView(labeled(category), topMargin(-1, 8)); form.addView(labeled(price), topMargin(-1, 8)); form.addView(labeled(hours), topMargin(-1, 8));
+        form.addView(labeled(name)); form.addView(labeled(category), topMargin(-1, 8)); form.addView(labeled(hours), topMargin(-1, 8));
         AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle(existing == null ? "Новая услуга" : "Изменить услугу")
                 .setView(form).setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null);
         if (existing != null) builder.setNeutralButton("Удалить", null);
@@ -1676,15 +2128,13 @@ public class MainActivity extends Activity {
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String title = name.getText().toString().trim();
-            long priceValue = parseLong(price.getText().toString());
             float hourValue = parseFloat(hours.getText().toString());
             if (title.isEmpty()) { name.setError("Укажите название"); return; }
-            if (priceValue <= 0) { price.setError("Укажите цену"); return; }
             if (hourValue <= 0) { hours.setError("Укажите длительность"); return; }
             Models.Service service = existing;
-            if (service == null) { service = new Models.Service(store.newId(), title, "Другое", priceValue, Math.round(hourValue * 60)); store.services.add(service); }
+            if (service == null) { service = new Models.Service(store.newId(), title, "Другое", Math.round(hourValue * 60)); store.services.add(service); }
             service.name = title; service.category = category.getText().toString().trim().isEmpty() ? "Другое" : category.getText().toString().trim();
-            service.price = priceValue; service.durationMinutes = Math.round(hourValue * 60);
+            service.durationMinutes = Math.round(hourValue * 60);
             store.save(); dialog.dismiss(); showServices();
             });
             if (existing != null) dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
@@ -1759,11 +2209,16 @@ public class MainActivity extends Activity {
     }
 
     private void chooseDateTime(Calendar selected, Button button, String prefix) {
+        chooseDateTime(selected, button, prefix, null);
+    }
+
+    private void chooseDateTime(Calendar selected, Button button, String prefix, Runnable changed) {
         DatePickerDialog dateDialog = new DatePickerDialog(this, (view, year, month, day) -> {
             selected.set(Calendar.YEAR, year); selected.set(Calendar.MONTH, month); selected.set(Calendar.DAY_OF_MONTH, day);
             TimePickerDialog timeDialog = new TimePickerDialog(this, (picker, hour, minute) -> {
                 selected.set(Calendar.HOUR_OF_DAY, hour); selected.set(Calendar.MINUTE, minute); selected.set(Calendar.SECOND, 0);
                 button.setText(prefix + dateTime.format(selected.getTime()));
+                if (changed != null) changed.run();
             }, selected.get(Calendar.HOUR_OF_DAY), selected.get(Calendar.MINUTE), true);
             timeDialog.show();
         }, selected.get(Calendar.YEAR), selected.get(Calendar.MONTH), selected.get(Calendar.DAY_OF_MONTH));
@@ -1828,23 +2283,82 @@ public class MainActivity extends Activity {
 
     private LinearLayout orderCard(Models.Order order) {
         LinearLayout card = card();
+        card.setPadding(dp(14), dp(10), dp(14), dp(10));
         card.setClickable(true);
+        card.setFocusable(true);
+        card.setContentDescription("Открыть заказ " + order.id);
         card.setOnClickListener(view -> showOrderDetail(order.id));
         addRipple(card);
-        LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(text("Заказ #" + order.id, 18, BLUE, Typeface.BOLD));
-        TextView schedule = text(dateTime.format(new Date(order.startAt)), 17, INK, Typeface.BOLD);
-        schedule.setGravity(Gravity.END);
-        top.addView(schedule, leftMargin(0, 12, 1));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text("Заказ #" + order.id, 18, BLUE, Typeface.BOLD),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView payment = paymentPill(order);
+        payment.setTextSize(11.5f);
+        payment.setPadding(dp(9), dp(4), dp(9), dp(4));
+        payment.setMinHeight(dp(28));
+        top.addView(payment);
         card.addView(top);
-        TextView services = text(serviceNames(order), 15, BLUE_DARK, Typeface.BOLD);
-        services.setGravity(Gravity.END);
-        card.addView(services, topMargin(-1, 7));
+
         String car = vehicle(order.car, order.carModel, order.plate);
-        card.addView(text(car.isEmpty() ? "Автомобиль не указан" : car, 15, INK, Typeface.BOLD), topMargin(-1, 9));
-        card.addView(text(order.clientName, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
-        card.addView(cardStatusRow(order), topMargin(-1, 11));
+        LinearLayout vehicleRow = new LinearLayout(this);
+        vehicleRow.setOrientation(LinearLayout.HORIZONTAL);
+        vehicleRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView vehicle = text(car.isEmpty() ? "Автомобиль не указан" : car, 16, INK, Typeface.BOLD);
+        vehicle.setSingleLine(true);
+        vehicle.setEllipsize(TextUtils.TruncateAt.END);
+        vehicleRow.addView(vehicle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView chevron = text("›", 26, INK, Typeface.NORMAL);
+        chevron.setGravity(Gravity.CENTER);
+        vehicleRow.addView(chevron, new LinearLayout.LayoutParams(dp(28), dp(32)));
+        card.addView(vehicleRow, topMargin(-1, 6));
+
+        LinearLayout clientRow = profileInfoLine(R.drawable.ic_user_outline, order.clientName);
+        card.addView(clientRow, topMargin(-1, 2));
+
+        String details = dateTime.format(new Date(order.startAt)) + "  •  " + serviceNames(order);
+        TextView detail = text(details, 13, MUTED, Typeface.NORMAL);
+        detail.setSingleLine(true);
+        detail.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(detail, topMargin(-1, 5));
         return card;
+    }
+
+    private LinearLayout todayOrderCard(Models.Order order) {
+        int accent = order.status.equals("Запланировано") ? AMBER : BLUE;
+        LinearLayout item = card();
+        item.setPadding(dp(14), dp(14), dp(14), dp(13));
+        item.setBackground(rounded(SURFACE, 12, 1, withAlpha(accent, 90)));
+        item.setClickable(true); item.setFocusable(true);
+        item.setContentDescription("Открыть заказ " + order.id);
+        item.setOnClickListener(view -> showOrderDetail(order.id));
+        addRipple(item);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.HORIZONTAL);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView timeView = text(time.format(new Date(order.startAt)), 19, accent, Typeface.BOLD);
+        heading.addView(timeView, new LinearLayout.LayoutParams(dp(70), ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView dot = text("•", 20, accent, Typeface.BOLD); dot.setGravity(Gravity.CENTER);
+        heading.addView(dot, new LinearLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.WRAP_CONTENT));
+        String vehicle = vehicle(order.car, order.carModel, "");
+        heading.addView(text(vehicle.isEmpty() ? "Автомобиль" : vehicle, 17, INK, Typeface.BOLD),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        heading.addView(text("›", 26, INK, Typeface.NORMAL));
+        item.addView(heading);
+
+        TextView services = text(serviceNames(order), 14, MUTED, Typeface.NORMAL);
+        LinearLayout.LayoutParams servicesParams = topMargin(-1, 5);
+        servicesParams.leftMargin = dp(94);
+        item.addView(services, servicesParams);
+        TextView status = statusPill(order.status);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusParams.topMargin = dp(8);
+        statusParams.leftMargin = dp(94);
+        item.addView(status, statusParams);
+        return item;
     }
 
     private LinearLayout orderHistoryCard(Models.Order order) {
@@ -1872,6 +2386,45 @@ public class MainActivity extends Activity {
         if (!order.phone.isEmpty()) card.addView(text(order.phone, 13, MUTED, Typeface.NORMAL), topMargin(-1, 4));
         card.addView(cardStatusRow(order), topMargin(-1, 11));
         return card;
+    }
+
+    private LinearLayout clientHistoryCard(Models.Order order) {
+        LinearLayout item = card();
+        item.setOrientation(LinearLayout.HORIZONTAL);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(12), dp(11), dp(12), dp(11));
+        item.setClickable(true);
+        item.setOnClickListener(view -> showOrderDetail(order.id));
+        addRipple(item);
+
+        TextView check = text(order.status.equals("Завершено") ? "✓" : "•", 25, Color.WHITE, Typeface.BOLD);
+        check.setGravity(Gravity.CENTER);
+        check.setBackground(circleDrawable(order.status.equals("Завершено") ? GREEN : BLUE));
+        item.addView(check, new LinearLayout.LayoutParams(dp(46), dp(46)));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(text("Заказ #" + order.id, 14, INK, Typeface.BOLD));
+        TextView services = text(serviceNames(order), 12, MUTED, Typeface.NORMAL);
+        services.setSingleLine(true);
+        services.setEllipsize(TextUtils.TruncateAt.END);
+        copy.addView(services, topMargin(-1, 3));
+        copy.addView(text(dateTime.format(new Date(order.startAt)), 11, MUTED, Typeface.NORMAL), topMargin(-1, 3));
+        item.addView(copy, leftMargin(-1, 11, 1));
+
+        LinearLayout value = new LinearLayout(this);
+        value.setOrientation(LinearLayout.VERTICAL);
+        value.setGravity(Gravity.END);
+        TextView total = text(money(order.total), 13, INK, Typeface.BOLD);
+        total.setGravity(Gravity.END);
+        value.addView(total);
+        TextView payment = paymentPill(order);
+        payment.setTextSize(11);
+        payment.setPadding(dp(8), dp(4), dp(8), dp(4));
+        payment.setMinHeight(dp(28));
+        value.addView(payment, topMargin(-1, 5));
+        item.addView(value, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return item;
     }
 
     private LinearLayout timelineCard(Models.Order order) {
@@ -1928,6 +2481,122 @@ public class MainActivity extends Activity {
         return pill;
     }
 
+    private TextView outlinedStatusPill(String status) {
+        int color = status.equals("Завершено") ? GREEN : status.equals("В работе") ? BLUE : AMBER;
+        TextView pill = text(status, 12, color, Typeface.BOLD);
+        if (status.equals("В работе")) {
+            pill.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_wrench, 0, 0, 0);
+            pill.setCompoundDrawableTintList(ColorStateList.valueOf(color));
+            pill.setCompoundDrawablePadding(dp(6));
+        }
+        pill.setPadding(dp(13), dp(6), dp(13), dp(6));
+        pill.setBackground(rounded(SURFACE, 14, 1, withAlpha(color, 145)));
+        pill.setMinHeight(dp(30));
+        return pill;
+    }
+
+    private TextView outlineChip(String value) {
+        TextView chip = text(value, 12, BLUE, Typeface.NORMAL);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(10), dp(4), dp(10), dp(4));
+        chip.setBackground(rounded(SURFACE, 8, 1, BLUE));
+        chip.setMinHeight(dp(28));
+        chip.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return chip;
+    }
+
+    private LinearLayout detailLine(int iconResource, String title, String subtitle) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(2), dp(4), dp(2), dp(4));
+        ImageView icon = iconView(iconResource, subtitle, BLUE);
+        row.addView(icon, new LinearLayout.LayoutParams(dp(25), dp(25)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView heading = text(title, 15, INK, Typeface.BOLD);
+        heading.setSingleLine(true);
+        heading.setEllipsize(TextUtils.TruncateAt.END);
+        copy.addView(heading);
+        if (subtitle != null && !subtitle.isEmpty()) copy.addView(text(subtitle, 12, MUTED, Typeface.NORMAL), topMargin(-1, 1));
+        row.addView(copy, leftMargin(-1, 12, 1));
+        return row;
+    }
+
+    private LinearLayout orderClientCard(Models.Order order, Models.Client client) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(13), dp(14), dp(12));
+        card.setBackground(rounded(SURFACE, 12, 1, BORDER));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout avatar = new FrameLayout(this);
+        avatar.setBackground(circleWithStroke(Color.rgb(248, 250, 252), BORDER, 1));
+        ImageView avatarIcon = iconView(R.drawable.ic_user_outline, "Клиент", MUTED);
+        avatar.addView(avatarIcon, new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER));
+        top.addView(avatar, new LinearLayout.LayoutParams(dp(58), dp(58)));
+
+        String clientName = client == null ? order.clientName : client.name;
+        String clientPhone = client == null || client.phone.isEmpty() ? order.phone : client.phone;
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView name = text(clientName, 16, INK, Typeface.BOLD);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        copy.addView(name);
+        copy.addView(profileInfoLine(R.drawable.ic_phone,
+                clientPhone.isEmpty() ? "Телефон не указан" : clientPhone), topMargin(-1, 4));
+        copy.addView(profileInfoLine(R.drawable.ic_car,
+                vehicle(order.car, order.carModel, order.plate)), topMargin(-1, 3));
+        top.addView(copy, leftMargin(-1, 13, 1));
+        TextView chevron = text("›", 27, INK, Typeface.NORMAL);
+        chevron.setGravity(Gravity.CENTER);
+        top.addView(chevron, new LinearLayout.LayoutParams(dp(28), dp(50)));
+        card.addView(top);
+
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        dividerParams.topMargin = dp(11);
+        card.addView(thinDivider(), dividerParams);
+
+        int orderCount = 0;
+        long orderTotal = 0;
+        for (Models.Order item : store.orders) {
+            if (!item.clientId.equals(order.clientId)) continue;
+            orderCount++;
+            orderTotal += item.total;
+        }
+        TextView meta = text(countCaption(orderCount, "заказ", "заказа", "заказов") + "  •  " + money(orderTotal),
+                13, MUTED, Typeface.NORMAL);
+        LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        metaParams.leftMargin = dp(71);
+        metaParams.topMargin = dp(9);
+        card.addView(meta, metaParams);
+        return card;
+    }
+
+    private LinearLayout compactValueRow(String title, String subtitle, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(10), 0, dp(10));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(text(title, 14, INK, Typeface.BOLD));
+        if (subtitle != null && !subtitle.isEmpty()) copy.addView(text(subtitle, 12, MUTED, Typeface.NORMAL), topMargin(-1, 2));
+        row.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(text(value + (subtitle == null || subtitle.isEmpty() ? "" : "   ›"), 14, INK, Typeface.BOLD));
+        return row;
+    }
+
+    private View thinDivider() {
+        View divider = new View(this);
+        divider.setBackgroundColor(BORDER);
+        divider.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        return divider;
+    }
+
     private TextView paymentPill(Models.Order order) {
         long advance = orderAdvance(order);
         String caption = order.paid ? "Оплачено" : advance > 0 ? "Аванс " + money(advance) : "Не оплачено";
@@ -1943,11 +2612,49 @@ public class MainActivity extends Activity {
 
     private LinearLayout metricCard(String label, String value, int accent) {
         LinearLayout item = card();
-        item.setMinimumHeight(dp(106));
-        item.setPadding(dp(15), dp(14), dp(15), dp(14));
-        item.addView(text(label, 12, MUTED, Typeface.NORMAL));
-        item.addView(text(value, 21, accent, Typeface.BOLD), topMargin(-1, 7));
+        item.setOrientation(LinearLayout.HORIZONTAL);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setMinimumHeight(dp(92));
+        item.setPadding(dp(14), dp(12), dp(14), dp(12));
+        int iconResource = label.toLowerCase(ru).contains("выруч") || label.toLowerCase(ru).contains("сумм")
+                ? R.drawable.ic_wallet : R.drawable.ic_nav_orders;
+        ImageView icon = iconView(iconResource, label, BLUE);
+        item.addView(icon, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(text(label, 12, MUTED, Typeface.NORMAL));
+        copy.addView(text(value, 20, INK, Typeface.BOLD), topMargin(-1, 3));
+        item.addView(copy, leftMargin(-1, 10, 1));
         return item;
+    }
+
+    private LinearLayout clientMetricCard(String value, String label, int iconResource) {
+        LinearLayout item = card();
+        item.setOrientation(LinearLayout.HORIZONTAL);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setMinimumHeight(dp(86));
+        item.setPadding(dp(13), dp(11), dp(12), dp(11));
+        ImageView icon = iconView(iconResource, label, BLUE);
+        item.addView(icon, new LinearLayout.LayoutParams(dp(35), dp(35)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(text(value, 17, INK, Typeface.BOLD));
+        copy.addView(text(label, 12, MUTED, Typeface.NORMAL), topMargin(-1, 2));
+        item.addView(copy, leftMargin(-1, 10, 1));
+        return item;
+    }
+
+    private LinearLayout profileInfoLine(int iconResource, String value) {
+        LinearLayout line = new LinearLayout(this);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView icon = iconView(iconResource, value, INK);
+        line.addView(icon, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        TextView copy = text(value, 13, MUTED, Typeface.NORMAL);
+        copy.setSingleLine(true);
+        copy.setEllipsize(TextUtils.TruncateAt.END);
+        line.addView(copy, leftMargin(-1, 7, 1));
+        return line;
     }
 
     private LinearLayout emptyCard(String title, String subtitle) {
@@ -2014,13 +2721,13 @@ public class MainActivity extends Activity {
 
     private LinearLayout card() {
         LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(16), dp(16), dp(16)); card.setBackground(rounded(SURFACE, 18, 1, BORDER)); card.setElevation(dp(1));
+        card.setPadding(dp(16), dp(14), dp(16), dp(14)); card.setBackground(rounded(SURFACE, 12, 1, BORDER)); card.setElevation(0);
         card.setMinimumHeight(dp(56));
         return card;
     }
 
     private LinearLayout cardWithColor(int color) {
-        LinearLayout item = card(); item.setBackground(rounded(color, 18, 0, Color.TRANSPARENT)); item.setPadding(dp(20), dp(20), dp(20), dp(20));
+        LinearLayout item = card(); item.setBackground(rounded(color, 12, 0, Color.TRANSPARENT)); item.setPadding(dp(16), dp(16), dp(16), dp(16));
         return item;
     }
 
@@ -2038,6 +2745,14 @@ public class MainActivity extends Activity {
         button.setStateListAnimator(null); return button;
     }
 
+    private Button iconButton(String caption, int iconResource) {
+        Button button = outlineButton(caption, BLUE);
+        button.setCompoundDrawablesWithIntrinsicBounds(iconResource, 0, 0, 0);
+        button.setCompoundDrawableTintList(ColorStateList.valueOf(BLUE));
+        button.setCompoundDrawablePadding(dp(8));
+        return button;
+    }
+
     private Button compactLinkButton(String caption) {
         Button button = new Button(this);
         button.setText(caption);
@@ -2051,6 +2766,21 @@ public class MainActivity extends Activity {
         button.setPadding(dp(13), 0, dp(10), 0);
         button.setMinHeight(dp(48));
         button.setBackground(rounded(Color.rgb(239, 246, 255), 12, 0, Color.TRANSPARENT));
+        button.setStateListAnimator(null);
+        return button;
+    }
+
+    private Button textActionButton(String caption) {
+        Button button = new Button(this);
+        button.setText(caption);
+        button.setTextColor(BLUE);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        button.setPadding(0, 0, 0, 0);
+        button.setMinHeight(dp(42));
+        button.setBackgroundColor(Color.TRANSPARENT);
         button.setStateListAnimator(null);
         return button;
     }
@@ -2082,6 +2812,14 @@ public class MainActivity extends Activity {
         EditText input = new EditText(this); input.setHint(hint); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setTextSize(16); input.setSingleLine(true);
         input.setId(View.generateViewId());
         input.setInputType(inputType); input.setPadding(dp(14), 0, dp(14), 0); input.setBackground(rounded(SURFACE, 12, 1, BORDER)); input.setMinHeight(dp(56));
+        return input;
+    }
+
+    private EditText compactField(String hint, int inputType) {
+        EditText input = field(hint, inputType);
+        input.setMinHeight(dp(50));
+        input.setTextSize(15);
+        input.setPadding(dp(12), 0, dp(12), 0);
         return input;
     }
 
@@ -2146,6 +2884,41 @@ public class MainActivity extends Activity {
         return wrapper;
     }
 
+    private LinearLayout referenceLabeled(EditText input) {
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
+        CharSequence hint = input.getHint();
+        TextView label = text(hint == null ? "Поле" : hint.toString(), 12, MUTED, Typeface.NORMAL);
+        label.setLabelFor(input.getId());
+        input.setHint("");
+        input.setTextSize(20);
+        input.setPadding(0, 0, 0, 0);
+        input.setBackgroundColor(Color.TRANSPARENT);
+        input.setMinHeight(dp(42));
+        wrapper.addView(label);
+        wrapper.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(43)));
+        wrapper.addView(thinDivider());
+        return wrapper;
+    }
+
+    private LinearLayout currencyLabeled(EditText input) {
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
+        TextView label = text("Цена в этом заказе", 12, MUTED, Typeface.NORMAL);
+        label.setLabelFor(input.getId());
+        input.setHint("");
+        input.setPadding(dp(12), 0, dp(42), 0);
+        FrameLayout fieldFrame = new FrameLayout(this);
+        fieldFrame.addView(input, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
+        TextView currency = text("₽", 16, MUTED, Typeface.NORMAL);
+        currency.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams currencyParams = new FrameLayout.LayoutParams(dp(40), dp(50), Gravity.END | Gravity.CENTER_VERTICAL);
+        fieldFrame.addView(currency, currencyParams);
+        wrapper.addView(label);
+        wrapper.addView(fieldFrame, topMargin(-1, 5));
+        return wrapper;
+    }
+
     private LinearLayout dialogForm() {
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(4), dp(6), dp(4), dp(6)); return form;
     }
@@ -2159,14 +2932,50 @@ public class MainActivity extends Activity {
         return section;
     }
 
+    private LinearLayout referenceSection(String title) {
+        LinearLayout section = new LinearLayout(this);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.setPadding(dp(14), dp(12), dp(14), dp(13));
+        section.setBackground(rounded(SURFACE, 12, 1, BORDER));
+        if (title != null && !title.isEmpty()) section.addView(text(title, 15, INK, Typeface.BOLD));
+        return section;
+    }
+
     private TextView text(String value, float size, int color, int style) {
         TextView view = new TextView(this); view.setText(value); view.setTextColor(color); view.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
         view.setTypeface(Typeface.DEFAULT, style); view.setLineSpacing(0, 1.08f); return view;
     }
 
+    private ImageView iconView(int resource, String description, int tint) {
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(resource);
+        icon.setImageTintList(ColorStateList.valueOf(tint));
+        icon.setContentDescription(description);
+        return icon;
+    }
+
     private GradientDrawable rounded(int fill, int radiusDp, int strokeDp, int strokeColor) {
         GradientDrawable drawable = new GradientDrawable(); drawable.setColor(fill); drawable.setCornerRadius(dp(radiusDp));
         if (strokeDp > 0) drawable.setStroke(dp(strokeDp), strokeColor); return drawable;
+    }
+
+    private GradientDrawable dashedRounded(int fill, int radiusDp, int strokeColor) {
+        GradientDrawable drawable = rounded(fill, radiusDp, 0, Color.TRANSPARENT);
+        drawable.setStroke(dp(1), strokeColor, dp(5), dp(4));
+        return drawable;
+    }
+
+    private GradientDrawable circleDrawable(int fill) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.OVAL);
+        drawable.setColor(fill);
+        return drawable;
+    }
+
+    private GradientDrawable circleWithStroke(int fill, int strokeColor, int strokeDp) {
+        GradientDrawable drawable = circleDrawable(fill);
+        drawable.setStroke(dp(strokeDp), strokeColor);
+        return drawable;
     }
 
     private void addRipple(View view) {

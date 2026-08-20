@@ -5,7 +5,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 final class Models {
     private Models() {}
@@ -14,26 +17,26 @@ final class Models {
         String id;
         String name;
         String category;
-        long price;
+        long legacyPrice;
         int durationMinutes;
 
-        Service(String id, String name, String category, long price, int durationMinutes) {
+        Service(String id, String name, String category, int durationMinutes) {
             this.id = id;
             this.name = name;
             this.category = category;
-            this.price = price;
             this.durationMinutes = durationMinutes;
         }
 
         JSONObject toJson() throws JSONException {
             return new JSONObject().put("id", id).put("name", name).put("category", category)
-                    .put("price", price).put("durationMinutes", durationMinutes);
+                    .put("durationMinutes", durationMinutes);
         }
 
         static Service fromJson(JSONObject json) {
-            return new Service(json.optString("id"), json.optString("name"),
-                    json.optString("category", "Другое"), json.optLong("price"),
-                    json.optInt("durationMinutes", 60));
+            Service service = new Service(json.optString("id"), json.optString("name"),
+                    json.optString("category", "Другое"), json.optInt("durationMinutes", 60));
+            service.legacyPrice = json.optLong("price");
+            return service;
         }
     }
 
@@ -107,6 +110,7 @@ final class Models {
         String plate;
         String orderNote;
         List<String> serviceIds = new ArrayList<>();
+        Map<String, Long> servicePrices = new LinkedHashMap<>();
         long total;
         long startAt;
         long deadlineAt;
@@ -139,13 +143,15 @@ final class Models {
             for (String serviceId : serviceIds) ids.put(serviceId);
             JSONArray before = new JSONArray();
             JSONArray after = new JSONArray();
+            JSONObject prices = new JSONObject();
+            for (Map.Entry<String, Long> entry : servicePrices.entrySet()) prices.put(entry.getKey(), entry.getValue());
             for (String uri : beforeUris) before.put(uri);
             for (String uri : afterUris) after.put(uri);
             return new JSONObject().put("id", id).put("clientId", clientId)
                     .put("clientName", clientName).put("phone", phone).put("car", car)
                     .put("carModelId", carModelId).put("carModel", carModel)
                     .put("plate", plate).put("orderNote", orderNote)
-                    .put("serviceIds", ids).put("total", total).put("startAt", startAt)
+                    .put("serviceIds", ids).put("servicePrices", prices).put("total", total).put("startAt", startAt)
                     .put("deadlineAt", deadlineAt).put("status", status).put("paid", paid)
                     .put("beforeUris", before).put("afterUris", after);
         }
@@ -159,6 +165,14 @@ final class Models {
                     json.optString("status", "Запланировано"), json.optBoolean("paid"));
             JSONArray ids = json.optJSONArray("serviceIds");
             if (ids != null) for (int i = 0; i < ids.length(); i++) order.serviceIds.add(ids.optString(i));
+            JSONObject prices = json.optJSONObject("servicePrices");
+            if (prices != null) {
+                Iterator<String> keys = prices.keys();
+                while (keys.hasNext()) {
+                    String serviceId = keys.next();
+                    order.servicePrices.put(serviceId, prices.optLong(serviceId));
+                }
+            }
             JSONArray before = json.optJSONArray("beforeUris");
             JSONArray after = json.optJSONArray("afterUris");
             if (before != null) for (int i = 0; i < before.length(); i++) order.beforeUris.add(before.optString(i));
@@ -168,6 +182,11 @@ final class Models {
             if (!legacyBefore.isEmpty() && order.beforeUris.isEmpty()) order.beforeUris.add(legacyBefore);
             if (!legacyAfter.isEmpty() && order.afterUris.isEmpty()) order.afterUris.add(legacyAfter);
             return order;
+        }
+
+        long servicePrice(String serviceId) {
+            Long value = servicePrices.get(serviceId);
+            return value == null ? 0 : value;
         }
     }
 
